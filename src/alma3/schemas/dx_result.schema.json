@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://almagenomics.com/schemas/alma3/dx_result.schema.json",
+  "title": "ALMA3 diagnostic result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "sample_id",
+    "release",
+    "status",
+    "accepted",
+    "path",
+    "decision"
+  ],
+  "properties": {
+    "kind": {"const": "alma3_dx_result"},
+    "schema_version": {"const": 1},
+    "sample_id": {"type": "string", "minLength": 1},
+    "release": {"$ref": "#/$defs/release"},
+    "status": {
+      "enum": ["no_call", "tumor_not_detected", "classified", "unresolved"]
+    },
+    "accepted": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/identityNode"}
+      ]
+    },
+    "path": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/pathNode"}
+    },
+    "decision": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/unresolvedDecision"}
+      ]
+    }
+  },
+  "$defs": {
+    "level": {
+      "enum": ["presence", "lineage", "family", "type", "subtype"]
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "probability": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_sha256", "taxonomy_sha256", "thresholds_sha256"],
+      "properties": {
+        "model_sha256": {"$ref": "#/$defs/sha256"},
+        "taxonomy_sha256": {"$ref": "#/$defs/sha256"},
+        "thresholds_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "identityNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "index", "label"],
+      "properties": {
+        "level": {"$ref": "#/$defs/level"},
+        "index": {"type": "integer", "minimum": 0},
+        "label": {"type": "string", "minLength": 1}
+      }
+    },
+    "pathNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "status", "index", "label", "score", "threshold"],
+      "properties": {
+        "level": {"$ref": "#/$defs/level"},
+        "status": {"enum": ["resolved", "implied"]},
+        "index": {"type": "integer", "minimum": 0},
+        "label": {"type": "string", "minLength": 1},
+        "score": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/probability"}
+          ]
+        },
+        "threshold": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/probability"}
+          ]
+        }
+      }
+    },
+    "unresolvedDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "status", "threshold"],
+      "properties": {
+        "level": {"$ref": "#/$defs/level"},
+        "status": {"const": "unresolved"},
+        "threshold": {"$ref": "#/$defs/probability"}
+      }
+    }
+  }
+}

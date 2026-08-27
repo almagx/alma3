@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://almagenomics.com/schemas/alma3_embedding_sidecar/v1",
+  "title": "ALMA3 embedding sidecar",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "release",
+    "representation",
+    "minimum_observed_cpgs",
+    "samples"
+  ],
+  "properties": {
+    "kind": {"const": "alma3_embedding_sidecar"},
+    "schema_version": {"const": 1},
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_sha256",
+        "model_sha256",
+        "taxonomy_sha256",
+        "cpg_manifest_sha256",
+        "thresholds_sha256"
+      ],
+      "properties": {
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "model_sha256": {"$ref": "#/$defs/sha256"},
+        "taxonomy_sha256": {"$ref": "#/$defs/sha256"},
+        "cpg_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "thresholds_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "representation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "dtype", "dimensions"],
+      "properties": {
+        "name": {"const": "diagnostic_trunk_embedding"},
+        "version": {"const": 1},
+        "dtype": {"const": "float32"},
+        "dimensions": {"type": "integer", "minimum": 1}
+      }
+    },
+    "minimum_observed_cpgs": {"type": "integer", "minimum": 1},
+    "samples": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sample_id", "observed_cpg_count", "embedding"],
+        "properties": {
+          "sample_id": {"type": "string", "minLength": 1},
+          "observed_cpg_count": {"type": "integer", "minimum": 1},
+          "embedding": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "number"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

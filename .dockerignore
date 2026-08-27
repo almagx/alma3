@@ -1,0 +1,13 @@
+*
+
+!.dockerignore
+!Dockerfile
+!README.md
+!LICENSE
+!pyproject.toml
+!requirements.txt
+!src/
+!src/alma3/
+!src/alma3/*.py
+!src/alma3/schemas/
+!src/alma3/schemas/*.json
