@@ -26,7 +26,7 @@ RELEASE_PAYLOADS = frozenset(
 )
 RELEASE_FILES = RELEASE_PAYLOADS | {"SHA256SUMS.json", "RELEASE_COMPLETE"}
 RELEASE_PROVENANCE_KIND = "alma3_dx_release_provenance"
-RELEASE_PROVENANCE_SCHEMA_VERSION = 7
+RELEASE_PROVENANCE_SCHEMA_VERSIONS = frozenset({7, 8})
 RELEASE_PROVENANCE_CORE_FIELDS = frozenset(
     {
         "kind",
@@ -142,13 +142,21 @@ def validate_release(
     if (
         not RELEASE_PROVENANCE_CORE_FIELDS.issubset(provenance)
         or provenance.get("kind") != RELEASE_PROVENANCE_KIND
-        or provenance.get("schema_version") != RELEASE_PROVENANCE_SCHEMA_VERSION
+        or provenance.get("schema_version") not in RELEASE_PROVENANCE_SCHEMA_VERSIONS
         or not _is_revision(provenance.get("evaluation_git_commit"))
         or any(not _is_sha256(provenance.get(field)) for field in PROVENANCE_SHA256_FIELDS)
         or provenance.get("thresholds_sha256") != hashes["thresholds.json"]
         or provenance.get("input_contract") != "per_cpg_uncertainty_v1"
     ):
         raise DxContractError("release provenance contract is invalid")
+    if provenance["schema_version"] == 8 and (
+        not _is_revision(provenance.get("training_git_commit"))
+        or not _is_revision(provenance.get("runtime_git_commit"))
+        or len(provenance["training_git_commit"]) != 40
+        or len(provenance["runtime_git_commit"]) != 40
+        or provenance["training_git_commit"] != provenance["evaluation_git_commit"]
+    ):
+        raise DxContractError("release source provenance is invalid")
     expected_threshold_bindings = {
         "model_sha256": hashes["model.safetensors"],
         "taxonomy_sha256": hashes["taxonomy.json"],
@@ -163,6 +171,10 @@ def validate_release(
         mismatches
         or thresholds.get("operating_policy_met") is not True
         or thresholds.get("evaluation_git_clean") is not True
+        or (
+            provenance["schema_version"] == 8
+            and thresholds.get("evaluation_git_commit") != provenance["training_git_commit"]
+        )
     ):
         raise DxContractError(
             "release threshold bindings are invalid"

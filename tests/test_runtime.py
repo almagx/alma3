@@ -22,7 +22,7 @@ from alma3.infer import (
 from alma3.model import FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
 
-from helpers import create_release, foundation_config, write_array_csv
+from helpers import create_release, foundation_config, sha256, write_array_csv, write_json
 
 
 class RuntimeContractTests(unittest.TestCase):
@@ -66,6 +66,31 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertEqual(set(path.name for path in release.iterdir()), set(RELEASE_FILES))
             self.assertEqual(validated["thresholds"]["minimum_observed_cpgs"], 1500)
             self.assertEqual(validated["config"].foundation.d_model, 8)
+
+            future = root / "future"
+            shutil.copytree(release, future)
+            provenance_path = future / "release_provenance.json"
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+            provenance.update(
+                {
+                    "schema_version": 8,
+                    "training_git_commit": provenance["evaluation_git_commit"],
+                    "runtime_git_commit": "a" * 40,
+                }
+            )
+            write_json(provenance_path, provenance)
+            manifest_path = future / "SHA256SUMS.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["release_provenance.json"] = sha256(provenance_path)
+            write_json(manifest_path, manifest)
+            self.assertEqual(validate_release(future)["provenance"]["schema_version"], 8)
+
+            provenance.pop("runtime_git_commit")
+            write_json(provenance_path, provenance)
+            manifest["release_provenance.json"] = sha256(provenance_path)
+            write_json(manifest_path, manifest)
+            with self.assertRaisesRegex(ValueError, "source provenance"):
+                validate_release(future)
 
             mutations = {
                 "marker": lambda path: (path / "RELEASE_COMPLETE").write_text("done\n", encoding="utf-8"),
