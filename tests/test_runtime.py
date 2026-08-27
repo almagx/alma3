@@ -19,7 +19,7 @@ from alma3.infer import (
     run_inference,
     validate_embedding_sidecar,
 )
-from alma3.model import FoundationModel
+from alma3.model import COMPLETED_CPG_PROFILE_NAME, FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
 
 from helpers import create_release, foundation_config, sha256, write_array_csv, write_json
@@ -57,6 +57,52 @@ class RuntimeContractTests(unittest.TestCase):
             model.logits_from_embedding(torch.zeros(2, config.d_model + 1))
         with self.assertRaisesRegex(ValueError, "float32"):
             model.logits_from_embedding(torch.zeros(2, config.d_model, dtype=torch.float64))
+
+    def test_map_representations_share_one_foundation_encoding(self) -> None:
+        config = foundation_config()
+        model = DiagnosticModel(
+            FoundationModel(config),
+            DxConfig(
+                foundation=config,
+                targets={target: 2 for target in DX_TARGETS},
+                hidden_dim=16,
+                dropout=0.0,
+            ),
+            freeze_foundation=False,
+        ).eval()
+        beta = torch.rand(2, config.n_cpgs)
+        observed = torch.ones(2, config.n_cpgs, dtype=torch.bool)
+        observed[:, ::5] = False
+        inputs = (
+            beta,
+            observed,
+            torch.zeros_like(beta),
+            torch.zeros(2, config.n_cpgs, dtype=torch.long),
+            torch.linspace(0, 1, config.n_cpgs).expand(2, -1),
+        )
+        original_encode = FoundationModel.encode_tokens
+        calls = 0
+
+        def count_encode(instance, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return original_encode(instance, *args, **kwargs)
+
+        with patch.object(FoundationModel, "encode_tokens", count_encode), torch.inference_mode():
+            representations = model.map_representations(*inputs)
+        self.assertEqual(calls, 1)
+        self.assertEqual(
+            set(representations),
+            {"diagnostic_trunk_embedding", COMPLETED_CPG_PROFILE_NAME},
+        )
+        diagnostic = representations["diagnostic_trunk_embedding"]
+        completed = representations[COMPLETED_CPG_PROFILE_NAME]
+        self.assertEqual(diagnostic.shape, (2, config.d_model))
+        self.assertEqual(completed.shape, beta.shape)
+        self.assertEqual(diagnostic.dtype, torch.float32)
+        self.assertEqual(completed.dtype, torch.float32)
+        self.assertTrue(torch.equal(completed[observed], beta[observed]))
+        self.assertTrue(bool(torch.all((completed[~observed] >= 0.0) & (completed[~observed] <= 1.0))))
 
     def test_release_validation_is_exact_and_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
