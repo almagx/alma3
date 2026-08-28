@@ -12,11 +12,6 @@ from torch.utils.checkpoint import checkpoint
 from .config import FoundationConfig
 
 
-COMPLETED_CPG_PROFILE_NAME = "completed_cpg_profile"
-COMPLETED_CPG_PROFILE_VERSION = 1
-COMPLETED_CPG_PROFILE_DTYPE = "float32"
-
-
 def positional_features(pos: torch.Tensor, bands: int) -> torch.Tensor:
     if bands <= 0:
         return pos[..., None]
@@ -304,20 +299,6 @@ class FoundationModel(nn.Module):
             raise ValueError("foundation tokens and observed mask must have shapes [B, N, D] and [B, N]")
         observed_f = observed.to(dtype=tokens.dtype)
         return (tokens * observed_f[..., None]).sum(dim=1) / observed_f.sum(dim=1, keepdim=True).clamp_min(1)
-
-    def embed_and_reconstruct(
-        self,
-        beta: torch.Tensor,
-        observed: torch.Tensor,
-        uncertainty: torch.Tensor,
-        chr_id: torch.Tensor,
-        pos: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return the pooled embedding and reconstructed CpGs from one token encoding."""
-        tokens = self.encode_tokens(beta, observed, uncertainty, chr_id, pos)
-        embedding = self.embedding_from_tokens(tokens, observed)
-        reconstruction = torch.sigmoid(self.head(tokens).squeeze(-1))
-        return embedding, reconstruction
 
     def forward(
         self,

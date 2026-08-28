@@ -11,10 +11,7 @@ import torch.nn as nn
 from safetensors.torch import load_file
 
 from .config import DxConfig
-from .model import (
-    COMPLETED_CPG_PROFILE_NAME,
-    FoundationModel,
-)
+from .model import FoundationModel
 from .sitewise import CANONICAL_BASE_SEED, CANONICAL_CONDITIONS, MINIMUM_RUNTIME_INPUT_CPGS
 
 DX_TARGETS = (
@@ -243,29 +240,6 @@ class DiagnosticModel(nn.Module):
     ) -> torch.Tensor:
         """Return the versioned post-trunk representation consumed by every Dx head."""
         return self.trunk(self.foundation.embed(beta, observed, uncertainty, chr_id, pos)).to(dtype=torch.float32)
-
-    def map_representations(
-        self,
-        beta: torch.Tensor,
-        observed: torch.Tensor,
-        uncertainty: torch.Tensor,
-        chr_id: torch.Tensor,
-        pos: torch.Tensor,
-    ) -> dict[str, torch.Tensor]:
-        """Return both governed map candidates from one foundation token encoding."""
-        foundation_embedding, reconstruction = self.foundation.embed_and_reconstruct(
-            beta,
-            observed,
-            uncertainty,
-            chr_id,
-            pos,
-        )
-        diagnostic_embedding = self.trunk(foundation_embedding).to(dtype=torch.float32)
-        completed_profile = torch.where(observed, beta, reconstruction).to(dtype=torch.float32)
-        return {
-            DX_REPRESENTATION_NAME: diagnostic_embedding,
-            COMPLETED_CPG_PROFILE_NAME: completed_profile,
-        }
 
     def logits_from_embedding(self, embedding: torch.Tensor) -> dict[str, torch.Tensor]:
         if embedding.ndim != 2 or embedding.shape[1] != self.config.foundation.d_model:
