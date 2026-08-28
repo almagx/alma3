@@ -150,8 +150,8 @@ class RuntimeContractTests(unittest.TestCase):
             cpg_mutations = {
                 "cpg-kind": lambda payload: payload.__setitem__("kind", "wrong"),
                 "cpg-count": lambda payload: payload.__setitem__("selected_cpg_count", 1),
-                "cpg-indices": lambda payload: payload["indices"].reverse(),
-                "cpg-algorithm": lambda payload: payload.__setitem__("selection_algorithm", "wrong"),
+                "cpg-indices": lambda payload: payload["indices"].__setitem__(0, payload["indices"][1]),
+                "cpg-algorithm": lambda payload: payload.__setitem__("selection_algorithm", ""),
                 "cpg-source-hash": lambda payload: payload.__setitem__("source_cpg_manifest_sha256", "bad"),
             }
             for name, mutation in cpg_mutations.items():
