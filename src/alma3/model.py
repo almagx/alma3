@@ -5,8 +5,8 @@ import math
 from pathlib import Path
 
 import torch
-import torch.nn as nn
 from safetensors.torch import load_file
+from torch import nn
 from torch.utils.checkpoint import checkpoint
 
 from .config import FoundationConfig

@@ -8,7 +8,6 @@ from typing import Any
 
 import torch
 
-
 _ALMA3_CHROMOSOME_COUNT = 24
 _GRCH38_CENTROMERE_BOUNDARIES = (
     123_400_000,
@@ -52,7 +51,7 @@ class CpGManifest:
     start: tuple[int, ...] | None = None
 
     @classmethod
-    def load(cls, path: str | Path) -> "CpGManifest":
+    def load(cls, path: str | Path) -> CpGManifest:
         manifest_path = Path(path)
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):

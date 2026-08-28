@@ -50,7 +50,7 @@ class FoundationConfig:
     activation_checkpointing: bool = False
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "FoundationConfig":
+    def from_dict(cls, raw: dict[str, Any]) -> FoundationConfig:
         if type(raw.get("architecture_version")) is not int or raw["architecture_version"] != 5:
             raise ConfigError("architecture_version must be 5")
         if "arm_cpg_counts" not in raw:
@@ -144,7 +144,7 @@ class DxConfig:
     dropout: float = 0.1
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "DxConfig":
+    def from_dict(cls, raw: dict[str, Any]) -> DxConfig:
         unknown = sorted(set(raw) - set(cls.__dataclass_fields__))
         if unknown:
             raise ConfigError(f"unknown Dx config field(s): {', '.join(unknown)}")

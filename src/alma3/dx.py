@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn as nn
 from safetensors.torch import load_file
+from torch import nn
 
 from .config import DxConfig
 from .model import FoundationModel
@@ -55,7 +55,7 @@ class Taxonomy:
     subtype_by_type: dict[str, tuple[str, ...]]
 
     @classmethod
-    def from_dict(cls, payload: dict[str, Any]) -> "Taxonomy":
+    def from_dict(cls, payload: dict[str, Any]) -> Taxonomy:
         if payload.get("kind") != "alma3_taxonomy":
             raise DxContractError("taxonomy kind must be alma3_taxonomy")
         levels = payload.get("levels")

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import torch
 
-
 CANONICAL_CONDITIONS: tuple[tuple[str, float | None], ...] = (
     ("clean", None),
     ("poisson_0p5", 0.5),

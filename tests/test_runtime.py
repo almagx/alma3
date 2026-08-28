@@ -17,13 +17,12 @@ from alma3.hashes import publish_new_file as publish_new_file_actual
 from alma3.infer import (
     InputContractError,
     load_bed_methyl_with_manifest,
-    main as infer_main,
     run_inference,
     validate_embedding_sidecar,
 )
+from alma3.infer import main as infer_main
 from alma3.model import FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
-
 from tests.helpers import (
     create_release,
     foundation_config,
@@ -272,16 +271,16 @@ class RuntimeContractTests(unittest.TestCase):
             with (
                 patch("alma3.infer.validate_release", return_value=validated),
                 patch("alma3.infer.publish_new_file", side_effect=fail_clinical_publish),
+                self.assertRaisesRegex(OSError, "clinical publication failed"),
             ):
-                with self.assertRaisesRegex(OSError, "clinical publication failed"):
-                    run_inference(
-                        release,
-                        input_path,
-                        "array-csv",
-                        failed_output,
-                        device="cpu",
-                        embedding_sidecar=failed_sidecar,
-                    )
+                run_inference(
+                    release,
+                    input_path,
+                    "array-csv",
+                    failed_output,
+                    device="cpu",
+                    embedding_sidecar=failed_sidecar,
+                )
             self.assertEqual(calls, 2)
             self.assertFalse(failed_output.exists())
             self.assertFalse(failed_sidecar.exists())

@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn as nn
 from safetensors.torch import save_file
+from torch import nn
 
 from alma3.config import CHROMOSOME_ARM_NAMES, DxConfig, FoundationConfig
 from alma3.data import CpGManifest
@@ -22,7 +22,6 @@ from alma3.dx import (
     load_thresholds,
 )
 from alma3.hashes import sha256_file
-from alma3.model import FoundationModel
 from alma3.sitewise import CANONICAL_BASE_SEED, CANONICAL_CONDITIONS, MINIMUM_RUNTIME_INPUT_CPGS
 
 

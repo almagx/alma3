@@ -7,8 +7,9 @@ import json
 import math
 import os
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import torch
 
