@@ -164,9 +164,7 @@ def _array_csv_batches(
         if duplicates:
             raise InputContractError(f"array CSV has duplicate CpG columns: {duplicates[:5]}")
         column_index = {name: idx for idx, name in enumerate(columns)}
-        missing = [cpg_id for cpg_id in cpg.cpg_ids if cpg_id not in column_index]
-        if missing:
-            raise InputContractError(f"array CSV missing required CpGs: {missing[:5]}")
+        cpg_columns = [column_index.get(cpg_id) for cpg_id in cpg.cpg_ids]
         sample_ids: list[str] = []
         seen_sample_ids: set[str] = set()
         values: list[list[float]] = []
@@ -182,8 +180,12 @@ def _array_csv_batches(
             seen_sample_ids.add(sample_id)
             sample_values: list[float] = []
             sample_observed: list[bool] = []
-            for cpg_id in cpg.cpg_ids:
-                raw = row[1 + column_index[cpg_id]].strip()
+            for column in cpg_columns:
+                if column is None:
+                    sample_values.append(0.0)
+                    sample_observed.append(False)
+                    continue
+                raw = row[1 + column].strip()
                 if raw == "" or raw.lower() == "nan":
                     sample_values.append(0.0)
                     sample_observed.append(False)

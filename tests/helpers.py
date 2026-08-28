@@ -220,10 +220,18 @@ def create_release(root: Path) -> tuple[Path, DiagnosticModel]:
     return root, model
 
 
-def write_array_csv(path: Path, *, sample_count: int = 3, observed: int = MINIMUM_RUNTIME_INPUT_CPGS) -> None:
+def write_array_csv(
+    path: Path,
+    *,
+    sample_count: int = 3,
+    observed: int = MINIMUM_RUNTIME_INPUT_CPGS,
+    omit_unobserved_columns: bool = False,
+) -> None:
     cpg_ids = [f"cg{index:07d}" for index in range(MINIMUM_RUNTIME_INPUT_CPGS)]
+    if omit_unobserved_columns:
+        cpg_ids = cpg_ids[:observed]
     rows = [",".join(["sample_id", *cpg_ids])]
     for sample_index in range(sample_count):
-        values = ["0.5" if index < observed else "" for index in range(MINIMUM_RUNTIME_INPUT_CPGS)]
+        values = ["0.5" if index < observed else "" for index in range(len(cpg_ids))]
         rows.append(",".join([f"sample-{sample_index + 1}", *values]))
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")

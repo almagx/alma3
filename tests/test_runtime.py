@@ -207,6 +207,44 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertFalse(failed_output.exists())
             self.assertFalse(failed_sidecar.exists())
 
+    def test_absent_array_columns_equal_blank_unobserved_cells(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, _ = create_release(root / "release")
+            complete_input = root / "complete.csv"
+            sparse_input = root / "sparse.csv"
+            write_array_csv(complete_input, sample_count=1, observed=1500)
+            write_array_csv(
+                sparse_input,
+                sample_count=1,
+                observed=1500,
+                omit_unobserved_columns=True,
+            )
+            complete_output = root / "complete.jsonl"
+            complete_sidecar = root / "complete.embedding.json"
+            sparse_output = root / "sparse.jsonl"
+            sparse_sidecar = root / "sparse.embedding.json"
+
+            run_inference(
+                release,
+                complete_input,
+                "array-csv",
+                complete_output,
+                device="cpu",
+                embedding_sidecar=complete_sidecar,
+            )
+            run_inference(
+                release,
+                sparse_input,
+                "array-csv",
+                sparse_output,
+                device="cpu",
+                embedding_sidecar=sparse_sidecar,
+            )
+
+            self.assertEqual(sparse_output.read_bytes(), complete_output.read_bytes())
+            self.assertEqual(sparse_sidecar.read_bytes(), complete_sidecar.read_bytes())
+
     def test_infer_cli_has_no_research_or_implicit_download_mode(self) -> None:
         arguments = [
             "--artifact",

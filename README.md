@@ -34,8 +34,10 @@ alma3 infer \
   --device cpu
 ```
 
-Array inputs use `--format array-csv`. Docker and Python use the same explicit
-local release-artifact contract; the runtime never downloads weights.
+Array inputs use `--format array-csv`. Missing CpG columns and blank cells are
+both treated as unobserved; every sample must still satisfy the calibrated
+observed-CpG floor in the release. Docker and Python use the same explicit local
+release-artifact contract; the runtime never downloads weights.
 
 The source is licensed under Apache-2.0. Model weights are separate artifacts
 and are not licensed by this repository.
