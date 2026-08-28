@@ -15,12 +15,13 @@ import torch
 from .clinical_result import results_from_logits, serialize_result
 from .data import CpGManifest
 from .dx import (
+    DX_REPRESENTATION_DIMENSIONS,
     DX_REPRESENTATION_DTYPE,
     DX_REPRESENTATION_NAME,
     DX_REPRESENTATION_VERSION,
 )
 from .hashes import publish_new_file, validate_new_external_outputs
-from .release import validate_release
+from .release import revalidate_release_identity, validate_release
 from .sitewise import real_coverage_presentation
 
 
@@ -79,8 +80,7 @@ def validate_embedding_sidecar(payload: Any) -> None:
         representation["name"] != DX_REPRESENTATION_NAME
         or representation["version"] != DX_REPRESENTATION_VERSION
         or representation["dtype"] != DX_REPRESENTATION_DTYPE
-        or type(representation["dimensions"]) is not int
-        or representation["dimensions"] <= 0
+        or representation["dimensions"] != DX_REPRESENTATION_DIMENSIONS
     ):
         raise InputContractError("embedding sidecar representation is invalid")
     minimum = payload["minimum_observed_cpgs"]
@@ -235,26 +235,21 @@ def load_array_csv(path: str | Path, cpg: CpGManifest) -> tuple[list[str], torch
 
 
 def load_bed_methyl_with_manifest(
-    path: str | Path, cpg_manifest_path: str | Path, sample_id: str | None = None
+    path: str | Path, cpg: CpGManifest, sample_id: str | None = None
 ) -> tuple[list[str], torch.Tensor, torch.Tensor, torch.Tensor]:
     input_path = Path(path)
-    payload = json.loads(Path(cpg_manifest_path).read_text())
-    cpg_ids = [str(x) for x in payload["cpg_ids"]]
-    chrom = payload.get("chrom") or payload.get("chr")
-    start = payload.get("start")
-    if chrom is None or start is None:
+    if cpg.chrom is None or cpg.start is None:
         raise InputContractError("bedMethyl inference requires chrom and genomic start in CpG manifest")
-    if len(chrom) != len(cpg_ids) or len(start) != len(cpg_ids):
-        raise InputContractError("cpg_manifest chrom/start lengths must match cpg_ids")
     coord_to_indices: dict[tuple[str, int], list[int]] = {}
-    for idx, (raw_chrom, raw_start) in enumerate(zip(chrom, start, strict=True)):
-        coord_to_indices.setdefault((str(raw_chrom), int(raw_start)), []).append(idx)
-    values = torch.zeros(len(cpg_ids), dtype=torch.float32)
-    observed = torch.zeros(len(cpg_ids), dtype=torch.bool)
-    coverage_by_cpg = torch.zeros(len(cpg_ids), dtype=torch.int64)
+    for idx, coordinate in enumerate(zip(cpg.chrom, cpg.start, strict=True)):
+        coord_to_indices.setdefault(coordinate, []).append(idx)
+    values = torch.zeros(len(cpg.cpg_ids), dtype=torch.float32)
+    observed = torch.zeros(len(cpg.cpg_ids), dtype=torch.bool)
+    coverage_by_cpg = torch.zeros(len(cpg.cpg_ids), dtype=torch.int64)
     seen_coords: set[tuple[str, int]] = set()
     opener = gzip.open if input_path.name.endswith(".gz") else open
     with opener(input_path, "rt", encoding="utf-8") as handle:
+        initial_stat = os.fstat(handle.fileno())
         reader = csv.reader(handle, delimiter="\t")
         for row in reader:
             if len(row) < 11:
@@ -283,9 +278,19 @@ def load_bed_methyl_with_manifest(
             values[indices] = fraction / 100.0
             observed[indices] = True
             coverage_by_cpg[indices] = coverage_count
+        try:
+            path_stat = input_path.stat()
+        except FileNotFoundError:
+            raise InputContractError("bedMethyl input changed while inference was running") from None
+        if _stat_identity(os.fstat(handle.fileno())) != _stat_identity(initial_stat) or _stat_identity(
+            path_stat
+        ) != _stat_identity(initial_stat):
+            raise InputContractError("bedMethyl input changed while inference was running")
     if int(observed.sum().item()) == 0:
         raise InputContractError("bedMethyl input did not match any release CpGs")
     sid = sample_id or input_path.name.replace(".bed.gz", "").replace(".bed", "")
+    if not isinstance(sid, str) or not sid.strip():
+        raise InputContractError("bedMethyl sample id must be nonempty")
     return [sid], values[None, :], observed[None, :], coverage_by_cpg[None, :]
 
 
@@ -313,7 +318,6 @@ def run_inference(
     taxonomy = validated["taxonomy"]
     cpg = validated["cpg"]
     model = validated["model"]
-    cpg_manifest_path = root / "cpg_manifest.json"
     release = {
         "model_sha256": hashes["model.safetensors"],
         "taxonomy_sha256": hashes["taxonomy.json"],
@@ -332,7 +336,7 @@ def run_inference(
             for sample_ids, x, observed in _array_csv_batches(input_path, cpg)
         )
     elif input_format == "bedmethyl":
-        sample_ids, x, observed, coverage = load_bed_methyl_with_manifest(input_path, cpg_manifest_path)
+        sample_ids, x, observed, coverage = load_bed_methyl_with_manifest(input_path, cpg)
         presentation = real_coverage_presentation(x, observed, coverage)
         batches = iter(
             ((sample_ids, presentation.beta_input, presentation.input_observed, presentation.uncertainty),)
@@ -407,7 +411,7 @@ def run_inference(
                         "name": DX_REPRESENTATION_NAME,
                         "version": DX_REPRESENTATION_VERSION,
                         "dtype": DX_REPRESENTATION_DTYPE,
-                        "dimensions": int(model.config.foundation.d_model),
+                        "dimensions": DX_REPRESENTATION_DIMENSIONS,
                     },
                     "minimum_observed_cpgs": minimum_observed,
                     "samples": sidecar_samples,
@@ -415,6 +419,12 @@ def run_inference(
                 validate_embedding_sidecar(sidecar_payload)
                 sidecar_out.parent.mkdir(parents=True, exist_ok=True)
                 sidecar_temporary = _json_temporary(sidecar_out, sidecar_payload)
+            revalidate_release_identity(
+                validated["root"],
+                manifest_sha256=validated["manifest_sha256"],
+                hashes=hashes,
+            )
+            if sidecar_out is not None:
                 sidecar_identity = publish_new_file(sidecar_temporary, sidecar_out)
             try:
                 publish_new_file(temporary, out)

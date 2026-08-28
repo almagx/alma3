@@ -17,6 +17,8 @@ PY
 COPY src ./src
 RUN python -m pip install --no-cache-dir --no-build-isolation --no-deps .
 
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/alma3-entrypoint
+
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
@@ -25,4 +27,5 @@ USER almauser
 
 RUN alma3 --help
 
+ENTRYPOINT ["alma3-entrypoint"]
 CMD ["alma3", "--help"]

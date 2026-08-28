@@ -4,18 +4,24 @@ import hashlib
 import json
 import math
 from pathlib import Path
+from typing import Any
 
 import torch
+import torch.nn as nn
 from safetensors.torch import save_file
 
 from alma3.config import CHROMOSOME_ARM_NAMES, DxConfig, FoundationConfig
+from alma3.data import CpGManifest
 from alma3.dx import (
     CALIBRATION_PRECISION_FLOOR,
     CALIBRATION_RULE,
     DX_TARGETS,
     THRESHOLDS_SCHEMA_VERSION,
     DiagnosticModel,
+    load_taxonomy,
+    load_thresholds,
 )
+from alma3.hashes import sha256_file
 from alma3.model import FoundationModel
 from alma3.sitewise import CANONICAL_BASE_SEED, CANONICAL_CONDITIONS, MINIMUM_RUNTIME_INPUT_CPGS
 
@@ -46,6 +52,36 @@ def foundation_config() -> FoundationConfig:
         cpg_id_dim=32,
         dropout=0.0,
     )
+
+
+def release_foundation_config() -> FoundationConfig:
+    base = foundation_config()
+    return FoundationConfig(
+        **{
+            **base.to_dict(),
+            "d_model": 1536,
+            "n_heads": 24,
+            "mlp_ratio": 1,
+        }
+    )
+
+
+class FixtureFoundation(nn.Module):
+    def __init__(self, config: FoundationConfig):
+        super().__init__()
+        self.config = config
+
+    def embed(
+        self,
+        beta: torch.Tensor,
+        observed: torch.Tensor,
+        uncertainty: torch.Tensor,
+        chr_id: torch.Tensor,
+        pos: torch.Tensor,
+    ) -> torch.Tensor:
+        del uncertainty, chr_id, pos
+        pooled = (beta * observed).sum(dim=1, keepdim=True) / observed.sum(dim=1, keepdim=True).clamp_min(1)
+        return pooled.expand(-1, self.config.d_model).contiguous()
 
 
 def taxonomy_payload() -> dict[str, object]:
@@ -162,14 +198,14 @@ def threshold_payload(bindings: dict[str, str]) -> dict[str, object]:
 def create_release(root: Path) -> tuple[Path, DiagnosticModel]:
     root.mkdir()
     torch.manual_seed(27)
-    foundation = foundation_config()
+    foundation = release_foundation_config()
     config = DxConfig(
         foundation=foundation,
         targets={target: 2 for target in DX_TARGETS},
         hidden_dim=16,
         dropout=0.0,
     )
-    model = DiagnosticModel(FoundationModel(foundation), config, freeze_foundation=False).eval()
+    model = DiagnosticModel(FixtureFoundation(foundation), config, freeze_foundation=False).eval()
     write_json(root / "config.json", config.to_dict())
     save_file(model.state_dict(), str(root / "model.safetensors"))
     write_json(root / "taxonomy.json", taxonomy_payload())
@@ -177,8 +213,17 @@ def create_release(root: Path) -> tuple[Path, DiagnosticModel]:
     write_json(
         root / "cpg_manifest.json",
         {
+            "kind": "alma3_cpg_manifest",
+            "schema_version": 1,
+            "bundle_fingerprint": "3" * 64,
             "cpg_ids": cpg_ids,
             "cpg_manifest_sha256": hashlib.sha256(("\n".join(cpg_ids) + "\n").encode()).hexdigest(),
+            "source_cpg_manifest_sha256": hashlib.sha256(
+                ("\n".join(cpg_ids) + "\n").encode()
+            ).hexdigest(),
+            "selected_cpg_count": MINIMUM_RUNTIME_INPUT_CPGS,
+            "selection_algorithm": "parent_conditioned_tumor_dataset_stability_v3",
+            "indices": list(range(MINIMUM_RUNTIME_INPUT_CPGS)),
             "chr_id": [0] * MINIMUM_RUNTIME_INPUT_CPGS,
             "chrom": ["chr1"] * MINIMUM_RUNTIME_INPUT_CPGS,
             "start": list(range(100, 100 + MINIMUM_RUNTIME_INPUT_CPGS)),
@@ -204,6 +249,17 @@ def create_release(root: Path) -> tuple[Path, DiagnosticModel]:
             "evaluation_freeze_sha256": "9" * 64,
             "thresholds_sha256": sha256(root / "thresholds.json"),
             "selection_calibration_sha256": thresholds["selection_calibration_sha256"],
+            "challenge_report_sha256": "a" * 64,
+            "challenge_envelope_sha256": "b" * 64,
+            "challenge_count_sha256": "c" * 64,
+            "challenge_protocol": "locked_alma_challenge_v5_per_cpg_uncertainty_v1",
+            "challenge_accounting": {
+                "assays": 62,
+                "subjects": 55,
+                "longread_assays": 60,
+                "array_assays": 2,
+            },
+            "challenge_metrics_are_descriptive": True,
             "input_contract": "per_cpg_uncertainty_v1",
         },
     )
@@ -218,6 +274,21 @@ def create_release(root: Path) -> tuple[Path, DiagnosticModel]:
     write_json(root / "SHA256SUMS.json", {name: sha256(root / name) for name in names})
     (root / "RELEASE_COMPLETE").write_text("complete\n", encoding="utf-8")
     return root, model
+
+
+def validated_release_fixture(root: Path, model: DiagnosticModel) -> dict[str, Any]:
+    hashes = json.loads((root / "SHA256SUMS.json").read_text(encoding="utf-8"))
+    return {
+        "root": root.resolve(),
+        "hashes": hashes,
+        "manifest_sha256": sha256_file(root / "SHA256SUMS.json"),
+        "config": model.config,
+        "taxonomy": load_taxonomy(root / "taxonomy.json"),
+        "cpg": CpGManifest.load(root / "cpg_manifest.json"),
+        "thresholds": load_thresholds(root / "thresholds.json"),
+        "provenance": json.loads((root / "release_provenance.json").read_text(encoding="utf-8")),
+        "model": model,
+    }
 
 
 def write_array_csv(

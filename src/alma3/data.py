@@ -48,20 +48,29 @@ class CpGManifest:
     pos: torch.Tensor
     source_cpg_manifest_sha256: str | None = None
     arm_id: torch.Tensor | None = None
+    chrom: tuple[str, ...] | None = None
+    start: tuple[int, ...] | None = None
 
     @classmethod
     def load(cls, path: str | Path) -> "CpGManifest":
         manifest_path = Path(path)
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        cpg_ids = tuple(str(value) for value in payload.get("cpg_ids", ()))
-        if not cpg_ids:
+        if not isinstance(payload, dict):
+            raise DataContractError("CpG manifest must be a JSON object")
+        raw_cpg_ids = payload.get("cpg_ids")
+        if not isinstance(raw_cpg_ids, list) or not raw_cpg_ids:
             raise DataContractError("CpG manifest requires non-empty cpg_ids")
+        if any(not isinstance(value, str) or not value for value in raw_cpg_ids):
+            raise DataContractError("CpG manifest cpg_ids must be non-empty strings")
+        cpg_ids = tuple(raw_cpg_ids)
         if len(set(cpg_ids)) != len(cpg_ids):
             raise DataContractError("CpG manifest cpg_ids must be unique")
         declared_digest = payload.get("cpg_manifest_sha256")
         if declared_digest is not None:
+            if not _is_sha256(declared_digest):
+                raise DataContractError("CpG manifest cpg_manifest_sha256 must be a lowercase SHA256")
             calculated = hashlib.sha256(("\n".join(cpg_ids) + "\n").encode()).hexdigest()
-            if str(declared_digest).lower() != calculated:
+            if declared_digest != calculated:
                 raise DataContractError("CpG manifest SHA256 does not match its ordered cpg_ids")
         chr_raw = payload.get("chr_id")
         pos_raw = payload.get("pos")
@@ -71,6 +80,8 @@ class CpGManifest:
         if chr_raw is None:
             if chrom_raw is None:
                 raise DataContractError("CpG manifest requires chr_id or chrom arrays")
+            if not isinstance(chrom_raw, list):
+                raise DataContractError("CpG manifest chrom must be an array")
             chr_raw = [_chrom_to_id(value) for value in chrom_raw]
         if pos_raw is None:
             raise DataContractError("architecture-5 CpG manifest requires explicit pos values")
@@ -82,6 +93,23 @@ class CpGManifest:
             raise DataContractError("CpG manifest pos values must be numeric")
         if len(chr_raw) != len(cpg_ids) or len(pos_raw) != len(cpg_ids):
             raise DataContractError("CpG manifest cpg_ids, chr_id, and pos lengths must match")
+        chrom: tuple[str, ...] | None = None
+        start: tuple[int, ...] | None = None
+        if chrom_raw is not None:
+            if not isinstance(chrom_raw, list) or len(chrom_raw) != len(cpg_ids):
+                raise DataContractError("CpG manifest chrom length must match cpg_ids")
+            chrom = tuple(str(value) for value in chrom_raw)
+            parsed_chromosomes = [_chrom_to_id(value) for value in chrom_raw]
+            if parsed_chromosomes != chr_raw:
+                raise DataContractError("CpG manifest chrom and chr_id arrays disagree")
+        if start_raw is not None:
+            if chrom is None or not isinstance(start_raw, list) or len(start_raw) != len(cpg_ids):
+                raise DataContractError("CpG manifest start requires a matching chrom array")
+            if any(type(value) is not int or value < 0 for value in start_raw):
+                raise DataContractError("CpG manifest start values must be non-negative integers")
+            start = tuple(start_raw)
+        if end_raw is not None and (start is None or not isinstance(end_raw, list)):
+            raise DataContractError("CpG manifest end requires matching chrom and start arrays")
         chr_id = torch.as_tensor(chr_raw, dtype=torch.long)
         pos = torch.as_tensor(pos_raw, dtype=torch.float32)
         if not bool(torch.isfinite(pos).all().item()) or bool(((pos < 0) | (pos > 1)).any().item()):
@@ -100,13 +128,26 @@ class CpGManifest:
             else None
         )
         source_hash = payload.get("source_cpg_manifest_sha256")
+        if source_hash is not None and not _is_sha256(source_hash):
+            raise DataContractError("CpG manifest source_cpg_manifest_sha256 must be a lowercase SHA256")
         return cls(
             cpg_ids=cpg_ids,
             chr_id=chr_id,
             pos=pos,
-            source_cpg_manifest_sha256=str(source_hash).lower() if source_hash else None,
+            source_cpg_manifest_sha256=source_hash,
             arm_id=arm_id,
+            chrom=chrom,
+            start=start,
         )
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and value == value.lower()
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def _chrom_to_id(value: object) -> int:

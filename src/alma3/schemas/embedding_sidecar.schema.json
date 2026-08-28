@@ -41,7 +41,7 @@
         "name": {"const": "diagnostic_trunk_embedding"},
         "version": {"const": 1},
         "dtype": {"const": "float32"},
-        "dimensions": {"type": "integer", "minimum": 1}
+        "dimensions": {"const": 1536}
       }
     },
     "minimum_observed_cpgs": {"type": "integer", "minimum": 1},
@@ -57,7 +57,8 @@
           "observed_cpg_count": {"type": "integer", "minimum": 1},
           "embedding": {
             "type": "array",
-            "minItems": 1,
+            "minItems": 1536,
+            "maxItems": 1536,
             "items": {"type": "number"}
           }
         }

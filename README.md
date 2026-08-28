@@ -13,8 +13,17 @@ pipeline, map reducer, or implicit artifact download.
 ALMA3 requires Python 3.12.
 
 ```bash
-python -m pip install .
+python -m pip install -r requirements.txt
+python -m pip install --no-deps \
+  --index-url https://download.pytorch.org/whl/cpu \
+  "torch==2.7.0"
+python -m pip install --no-build-isolation --no-deps .
+python -m pip check
 ```
+
+Installing `.` directly lets pip choose the generic CUDA-enabled Torch wheel.
+The explicit sequence above keeps the standalone runtime CPU-only, matching the
+runtime image.
 
 ## Verify a release
 
@@ -41,3 +50,16 @@ release-artifact contract; the runtime never downloads weights.
 
 The source is licensed under Apache-2.0. Model weights are separate artifacts
 and are not licensed by this repository.
+
+## Run with Docker
+
+The image contains the CPU runtime but no weights. Mount a release explicitly:
+
+```bash
+docker run --rm \
+  -v /path/to/alma3-release:/release:ro \
+  alma3-runtime verify-release --artifact /release
+```
+
+Commands supplied by orchestration remain supported, including the explicit
+`alma3 infer ...` form used by almagx.

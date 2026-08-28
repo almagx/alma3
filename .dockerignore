@@ -6,6 +6,7 @@
 !LICENSE
 !pyproject.toml
 !requirements.txt
+!docker-entrypoint.sh
 !src/
 !src/alma3/
 !src/alma3/*.py

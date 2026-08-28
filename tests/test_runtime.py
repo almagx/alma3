@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from alma3.dx import DX_TARGETS, DiagnosticModel
 from alma3.hashes import publish_new_file as publish_new_file_actual
 from alma3.infer import (
     InputContractError,
+    load_bed_methyl_with_manifest,
     main as infer_main,
     run_inference,
     validate_embedding_sidecar,
@@ -22,7 +24,30 @@ from alma3.infer import (
 from alma3.model import FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
 
-from helpers import create_release, foundation_config, sha256, write_array_csv, write_json
+from tests.helpers import (
+    create_release,
+    foundation_config,
+    sha256,
+    validated_release_fixture,
+    write_array_csv,
+    write_json,
+)
+
+
+def _assert_json_close(test: unittest.TestCase, left, right, *, atol: float = 1e-5) -> None:
+    test.assertIs(type(left), type(right))
+    if isinstance(left, dict):
+        test.assertEqual(set(left), set(right))
+        for key in left:
+            _assert_json_close(test, left[key], right[key], atol=atol)
+    elif isinstance(left, list):
+        test.assertEqual(len(left), len(right))
+        for left_value, right_value in zip(left, right, strict=True):
+            _assert_json_close(test, left_value, right_value, atol=atol)
+    elif isinstance(left, float):
+        test.assertTrue(math.isclose(left, right, rel_tol=0.0, abs_tol=atol), (left, right))
+    else:
+        test.assertEqual(left, right)
 
 
 class RuntimeContractTests(unittest.TestCase):
@@ -61,11 +86,12 @@ class RuntimeContractTests(unittest.TestCase):
     def test_release_validation_is_exact_and_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            release, _ = create_release(root / "release")
-            validated = validate_release(release)
-            self.assertEqual(set(path.name for path in release.iterdir()), set(RELEASE_FILES))
+            release, model = create_release(root / "release")
+            with patch("alma3.release.load_dx", return_value=model):
+                validated = validate_release(release)
+            self.assertEqual({path.name for path in release.iterdir()}, set(RELEASE_FILES))
             self.assertEqual(validated["thresholds"]["minimum_observed_cpgs"], 1500)
-            self.assertEqual(validated["config"].foundation.d_model, 8)
+            self.assertEqual(validated["config"].foundation.d_model, 1536)
 
             future = root / "future"
             shutil.copytree(release, future)
@@ -83,14 +109,30 @@ class RuntimeContractTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest["release_provenance.json"] = sha256(provenance_path)
             write_json(manifest_path, manifest)
-            self.assertEqual(validate_release(future)["provenance"]["schema_version"], 8)
+            with patch("alma3.release.load_dx", return_value=model):
+                self.assertEqual(validate_release(future)["provenance"]["schema_version"], 8)
 
             provenance.pop("runtime_git_commit")
             write_json(provenance_path, provenance)
             manifest["release_provenance.json"] = sha256(provenance_path)
             write_json(manifest_path, manifest)
-            with self.assertRaisesRegex(ValueError, "source provenance"):
+            with self.assertRaisesRegex(ValueError, "provenance"):
                 validate_release(future)
+
+            wrong_dimensions = root / "wrong-dimensions"
+            shutil.copytree(release, wrong_dimensions)
+            config_path = wrong_dimensions / "config.json"
+            config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+            config_payload["foundation"]["d_model"] = 8
+            config_payload["foundation"]["n_heads"] = 2
+            write_json(config_path, config_payload)
+            wrong_manifest = json.loads(
+                (wrong_dimensions / "SHA256SUMS.json").read_text(encoding="utf-8")
+            )
+            wrong_manifest["config.json"] = sha256(config_path)
+            write_json(wrong_dimensions / "SHA256SUMS.json", wrong_manifest)
+            with self.assertRaisesRegex(ValueError, "embedding dimension must be 1536"):
+                validate_release(wrong_dimensions)
 
             mutations = {
                 "marker": lambda path: (path / "RELEASE_COMPLETE").write_text("done\n", encoding="utf-8"),
@@ -106,10 +148,34 @@ class RuntimeContractTests(unittest.TestCase):
                     with self.assertRaises((ValueError, FileNotFoundError)):
                         validate_release(candidate)
 
+            cpg_mutations = {
+                "cpg-kind": lambda payload: payload.__setitem__("kind", "wrong"),
+                "cpg-count": lambda payload: payload.__setitem__("selected_cpg_count", 1),
+                "cpg-indices": lambda payload: payload["indices"].reverse(),
+                "cpg-algorithm": lambda payload: payload.__setitem__("selection_algorithm", "wrong"),
+                "cpg-source-hash": lambda payload: payload.__setitem__("source_cpg_manifest_sha256", "bad"),
+            }
+            for name, mutation in cpg_mutations.items():
+                with self.subTest(name=name):
+                    candidate = root / name
+                    shutil.copytree(release, candidate)
+                    cpg_path = candidate / "cpg_manifest.json"
+                    cpg_payload = json.loads(cpg_path.read_text(encoding="utf-8"))
+                    mutation(cpg_payload)
+                    write_json(cpg_path, cpg_payload)
+                    candidate_manifest = json.loads(
+                        (candidate / "SHA256SUMS.json").read_text(encoding="utf-8")
+                    )
+                    candidate_manifest["cpg_manifest.json"] = sha256(cpg_path)
+                    write_json(candidate / "SHA256SUMS.json", candidate_manifest)
+                    with self.assertRaisesRegex(ValueError, "CpG manifest"):
+                        validate_release(candidate)
+
     def test_inference_and_sidecar_share_one_embedding_tensor_and_input_order(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            release, _ = create_release(root / "release")
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
             input_path = root / "input.csv"
             write_array_csv(input_path, sample_count=3)
             output = root / "result.jsonl"
@@ -131,6 +197,7 @@ class RuntimeContractTests(unittest.TestCase):
                 return original_logits(instance, embedding, *args, **kwargs)
 
             with (
+                patch("alma3.infer.validate_release", return_value=validated),
                 patch.object(DiagnosticModel, "embed", record_embed),
                 patch.object(DiagnosticModel, "logits_from_embedding", record_logits),
             ):
@@ -149,6 +216,11 @@ class RuntimeContractTests(unittest.TestCase):
             results = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
             payload = json.loads(sidecar.read_text(encoding="utf-8"))
             validate_embedding_sidecar(payload)
+            self.assertEqual(payload["representation"]["dimensions"], 1536)
+            invalid_sidecar = json.loads(json.dumps(payload))
+            invalid_sidecar["representation"]["dimensions"] = 8
+            with self.assertRaisesRegex(InputContractError, "representation is invalid"):
+                validate_embedding_sidecar(invalid_sidecar)
             self.assertEqual([row["sample_id"] for row in results], ["sample-1", "sample-2", "sample-3"])
             self.assertEqual(
                 [row["sample_id"] for row in payload["samples"]],
@@ -163,12 +235,16 @@ class RuntimeContractTests(unittest.TestCase):
     def test_sparse_and_interrupted_inference_publish_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            release, _ = create_release(root / "release")
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
             sparse = root / "sparse.csv"
             write_array_csv(sparse, sample_count=1, observed=1499)
             sparse_output = root / "sparse.jsonl"
             sparse_sidecar = root / "sparse.embedding.json"
-            with self.assertRaisesRegex(InputContractError, "below calibrated observed-CpG floor"):
+            with (
+                patch("alma3.infer.validate_release", return_value=validated),
+                self.assertRaisesRegex(InputContractError, "below calibrated observed-CpG floor"),
+            ):
                 run_inference(
                     release,
                     sparse,
@@ -193,7 +269,10 @@ class RuntimeContractTests(unittest.TestCase):
                     return publish_new_file_actual(temporary, destination)
                 raise OSError("clinical publication failed")
 
-            with patch("alma3.infer.publish_new_file", side_effect=fail_clinical_publish):
+            with (
+                patch("alma3.infer.validate_release", return_value=validated),
+                patch("alma3.infer.publish_new_file", side_effect=fail_clinical_publish),
+            ):
                 with self.assertRaisesRegex(OSError, "clinical publication failed"):
                     run_inference(
                         release,
@@ -210,7 +289,8 @@ class RuntimeContractTests(unittest.TestCase):
     def test_absent_array_columns_equal_blank_unobserved_cells(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            release, _ = create_release(root / "release")
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
             complete_input = root / "complete.csv"
             sparse_input = root / "sparse.csv"
             write_array_csv(complete_input, sample_count=1, observed=1500)
@@ -225,25 +305,80 @@ class RuntimeContractTests(unittest.TestCase):
             sparse_output = root / "sparse.jsonl"
             sparse_sidecar = root / "sparse.embedding.json"
 
-            run_inference(
-                release,
-                complete_input,
-                "array-csv",
-                complete_output,
-                device="cpu",
-                embedding_sidecar=complete_sidecar,
+            with patch("alma3.infer.validate_release", return_value=validated):
+                run_inference(
+                    release,
+                    complete_input,
+                    "array-csv",
+                    complete_output,
+                    device="cpu",
+                    embedding_sidecar=complete_sidecar,
+                )
+                run_inference(
+                    release,
+                    sparse_input,
+                    "array-csv",
+                    sparse_output,
+                    device="cpu",
+                    embedding_sidecar=sparse_sidecar,
+                )
+
+            _assert_json_close(
+                self,
+                json.loads(sparse_output.read_text(encoding="utf-8")),
+                json.loads(complete_output.read_text(encoding="utf-8")),
             )
-            run_inference(
-                release,
-                sparse_input,
-                "array-csv",
-                sparse_output,
-                device="cpu",
-                embedding_sidecar=sparse_sidecar,
+            _assert_json_close(
+                self,
+                json.loads(sparse_sidecar.read_text(encoding="utf-8")),
+                json.loads(complete_sidecar.read_text(encoding="utf-8")),
             )
 
-            self.assertEqual(sparse_output.read_bytes(), complete_output.read_bytes())
-            self.assertEqual(sparse_sidecar.read_bytes(), complete_sidecar.read_bytes())
+    def test_bedmethyl_and_release_changes_fail_before_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            bed = root / "sample.bed"
+            bed.write_text("chr1\t100\t101\t.\t0\t.\t100\t101\t0\t10\t50\n", encoding="utf-8")
+            original_reader = __import__("csv").reader
+
+            def mutating_reader(handle, *args, **kwargs):
+                yield from original_reader(handle, *args, **kwargs)
+                bed.write_text("changed\n", encoding="utf-8")
+
+            with (
+                patch("alma3.infer.csv.reader", mutating_reader),
+                self.assertRaisesRegex(InputContractError, "changed while inference was running"),
+            ):
+                load_bed_methyl_with_manifest(bed, validated["cpg"])
+
+            input_path = root / "input.csv"
+            write_array_csv(input_path, sample_count=1)
+            output = root / "result.jsonl"
+            sidecar = root / "embedding.json"
+            original_logits = DiagnosticModel.logits_from_embedding
+
+            def mutate_release(instance, embedding):
+                logits = original_logits(instance, embedding)
+                (release / "RELEASE_COMPLETE").write_text("changed\n", encoding="utf-8")
+                return logits
+
+            with (
+                patch("alma3.infer.validate_release", return_value=validated),
+                patch.object(DiagnosticModel, "logits_from_embedding", mutate_release),
+                self.assertRaisesRegex(ValueError, "release artifact changed during inference"),
+            ):
+                run_inference(
+                    release,
+                    input_path,
+                    "array-csv",
+                    output,
+                    device="cpu",
+                    embedding_sidecar=sidecar,
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(sidecar.exists())
 
     def test_infer_cli_has_no_research_or_implicit_download_mode(self) -> None:
         arguments = [

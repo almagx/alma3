@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -38,14 +39,20 @@ class RepositoryBoundaryTests(unittest.TestCase):
         self.assertNotIn("evaluate", cli)
 
     def test_repository_contains_no_private_paths_or_binary_artifacts(self) -> None:
-        files = [path for path in ROOT.rglob("*") if path.is_file() and ".git" not in path.parts]
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        ).stdout.split(b"\0")
+        files = [ROOT / path.decode() for path in tracked if path]
         forbidden_suffixes = {".safetensors", ".pt", ".pth", ".h5", ".hdf5"}
         self.assertFalse([path for path in files if path.suffix.lower() in forbidden_suffixes])
         searchable = [
             path
             for path in files
             if "tests" not in path.parts
-            and (path.suffix in {".py", ".md", ".toml"} or path.name == "Dockerfile")
+            and (path.suffix in {".py", ".md", ".toml", ".sh"} or path.name == "Dockerfile")
         ]
         joined = "\n".join(path.read_text(encoding="utf-8") for path in searchable).lower()
         for forbidden in ("/home/", "/data/", "pacmap", "raw-beta", "schema-v3", "schema-v5"):

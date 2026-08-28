@@ -3,13 +3,20 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import torch
 
 from .config import DxConfig
 from .data import CpGManifest
-from .dx import DX_TARGETS, DxContractError, load_dx, load_taxonomy, load_thresholds
+from .dx import (
+    DX_REPRESENTATION_DIMENSIONS,
+    DX_TARGETS,
+    DxContractError,
+    load_dx,
+    load_taxonomy,
+    load_thresholds,
+)
 from .hashes import sha256_file, verify_sha256_manifest
 from .model import validate_chromosome_layout
 
@@ -27,7 +34,7 @@ RELEASE_PAYLOADS = frozenset(
 RELEASE_FILES = RELEASE_PAYLOADS | {"SHA256SUMS.json", "RELEASE_COMPLETE"}
 RELEASE_PROVENANCE_KIND = "alma3_dx_release_provenance"
 RELEASE_PROVENANCE_SCHEMA_VERSIONS = frozenset({7, 8})
-RELEASE_PROVENANCE_CORE_FIELDS = frozenset(
+RELEASE_PROVENANCE_V7_FIELDS = frozenset(
     {
         "kind",
         "schema_version",
@@ -37,17 +44,56 @@ RELEASE_PROVENANCE_CORE_FIELDS = frozenset(
         "evaluation_freeze_sha256",
         "thresholds_sha256",
         "selection_calibration_sha256",
+        "challenge_report_sha256",
+        "challenge_envelope_sha256",
+        "challenge_count_sha256",
+        "challenge_protocol",
+        "challenge_accounting",
+        "challenge_metrics_are_descriptive",
         "input_contract",
     }
 )
+RELEASE_PROVENANCE_V8_FIELDS = RELEASE_PROVENANCE_V7_FIELDS | {
+    "training_git_commit",
+    "runtime_git_commit",
+}
 PROVENANCE_SHA256_FIELDS = frozenset(
     {
         "training_manifest_sha256",
         "evaluation_freeze_sha256",
         "thresholds_sha256",
         "selection_calibration_sha256",
+        "challenge_report_sha256",
+        "challenge_envelope_sha256",
+        "challenge_count_sha256",
     }
 )
+CHALLENGE_PROTOCOL = "locked_alma_challenge_v5_per_cpg_uncertainty_v1"
+CHALLENGE_ACCOUNTING = {
+    "assays": 62,
+    "subjects": 55,
+    "longread_assays": 60,
+    "array_assays": 2,
+}
+CPG_MANIFEST_SCHEMA_VERSION = 1
+CPG_MANIFEST_REQUIRED_FIELDS = frozenset(
+    {
+        "kind",
+        "schema_version",
+        "bundle_fingerprint",
+        "cpg_manifest_sha256",
+        "source_cpg_manifest_sha256",
+        "selected_cpg_count",
+        "selection_algorithm",
+        "cpg_ids",
+        "indices",
+        "pos",
+        "chrom",
+        "start",
+        "end",
+    }
+)
+CPG_MANIFEST_OPTIONAL_FIELDS = frozenset({"chr_id"})
 
 
 def _is_sha256(value: object) -> bool:
@@ -89,12 +135,63 @@ def _artifact_files(root: Path) -> set[str]:
     return {path.relative_to(root).as_posix() for path in paths if path.is_file()}
 
 
+def _validate_cpg_release_contract(payload: dict[str, Any], cpg: CpGManifest, config: DxConfig) -> None:
+    fields = set(payload)
+    if not CPG_MANIFEST_REQUIRED_FIELDS.issubset(fields) or not fields.issubset(
+        CPG_MANIFEST_REQUIRED_FIELDS | CPG_MANIFEST_OPTIONAL_FIELDS
+    ):
+        raise DxContractError("release CpG manifest fields are invalid")
+    row_count = len(cpg.cpg_ids)
+    indices = payload.get("indices")
+    selection_algorithm = payload.get("selection_algorithm")
+    if (
+        payload.get("kind") != "alma3_cpg_manifest"
+        or payload.get("schema_version") != CPG_MANIFEST_SCHEMA_VERSION
+        or not _is_sha256(payload.get("bundle_fingerprint"))
+        or not _is_sha256(payload.get("cpg_manifest_sha256"))
+        or not _is_sha256(payload.get("source_cpg_manifest_sha256"))
+        or payload.get("selected_cpg_count") != row_count
+        or config.foundation.n_cpgs != row_count
+        or not isinstance(selection_algorithm, str)
+        or not selection_algorithm
+        or not isinstance(indices, list)
+        or len(indices) != row_count
+        or any(type(index) is not int for index in indices)
+        or any(index < 0 for index in indices)
+        or len(set(indices)) != row_count
+        or cpg.chrom is None
+        or cpg.start is None
+        or cpg.arm_id is None
+    ):
+        raise DxContractError("release CpG manifest contract is invalid")
+
+
+def revalidate_release_identity(
+    artifact: str | Path,
+    *,
+    manifest_sha256: str,
+    hashes: Mapping[str, str],
+) -> None:
+    root = Path(artifact).resolve()
+    if _artifact_files(root) != RELEASE_FILES:
+        raise DxContractError("release artifact changed during inference")
+    if (root / "RELEASE_COMPLETE").read_bytes() != b"complete\n":
+        raise DxContractError("release artifact changed during inference")
+    if sha256_file(root / "SHA256SUMS.json") != manifest_sha256:
+        raise DxContractError("release manifest changed during inference")
+    if verify_sha256_manifest(root, required=RELEASE_PAYLOADS) != dict(hashes):
+        raise DxContractError("release payloads changed during inference")
+
+
 def validate_release(
     artifact: str | Path,
     *,
     device: torch.device | str = "cpu",
 ) -> dict[str, Any]:
-    root = Path(artifact).resolve()
+    artifact_path = Path(artifact)
+    if artifact_path.is_symlink():
+        raise DxContractError(f"release artifact must not be a symbolic link: {artifact_path}")
+    root = artifact_path.resolve()
     files = _artifact_files(root)
     if files != RELEASE_FILES:
         missing = sorted(RELEASE_FILES - files)
@@ -110,6 +207,10 @@ def validate_release(
     if set(config_payload) != {"foundation", "targets", "hidden_dim", "dropout"}:
         raise DxContractError("release model config fields are invalid")
     config = DxConfig.from_dict(config_payload)
+    if config.foundation.d_model != DX_REPRESENTATION_DIMENSIONS:
+        raise DxContractError(
+            f"released diagnostic embedding dimension must be {DX_REPRESENTATION_DIMENSIONS}"
+        )
 
     taxonomy_payload = _read_object(root / "taxonomy.json", "release taxonomy")
     if set(taxonomy_payload) != {
@@ -133,23 +234,38 @@ def validate_release(
         raise DxContractError("release taxonomy levels are invalid")
     taxonomy = load_taxonomy(root / "taxonomy.json")
     taxonomy.validate_sizes(config.targets)
+    if taxonomy.classes["hematolymphoid_tumor_presence"] != ("absent", "present"):
+        raise DxContractError("release tumor-presence taxonomy must be exactly absent, present")
 
+    cpg_payload = _read_object(root / "cpg_manifest.json", "release CpG manifest")
     cpg = CpGManifest.load(root / "cpg_manifest.json")
+    _validate_cpg_release_contract(cpg_payload, cpg, config)
     validate_chromosome_layout(config.foundation, cpg.chr_id, cpg.arm_id)
 
     thresholds = load_thresholds(root / "thresholds.json")
     provenance = _read_object(root / "release_provenance.json", "release provenance")
+    schema_version = provenance.get("schema_version")
+    expected_provenance_fields = {
+        7: RELEASE_PROVENANCE_V7_FIELDS,
+        8: RELEASE_PROVENANCE_V8_FIELDS,
+    }.get(schema_version)
     if (
-        not RELEASE_PROVENANCE_CORE_FIELDS.issubset(provenance)
+        expected_provenance_fields is None
+        or set(provenance) != expected_provenance_fields
         or provenance.get("kind") != RELEASE_PROVENANCE_KIND
-        or provenance.get("schema_version") not in RELEASE_PROVENANCE_SCHEMA_VERSIONS
+        or schema_version not in RELEASE_PROVENANCE_SCHEMA_VERSIONS
+        or not isinstance(provenance.get("generated_at"), str)
+        or not provenance["generated_at"]
         or not _is_revision(provenance.get("evaluation_git_commit"))
         or any(not _is_sha256(provenance.get(field)) for field in PROVENANCE_SHA256_FIELDS)
         or provenance.get("thresholds_sha256") != hashes["thresholds.json"]
+        or provenance.get("challenge_protocol") != CHALLENGE_PROTOCOL
+        or provenance.get("challenge_accounting") != CHALLENGE_ACCOUNTING
+        or provenance.get("challenge_metrics_are_descriptive") is not True
         or provenance.get("input_contract") != "per_cpg_uncertainty_v1"
     ):
         raise DxContractError("release provenance contract is invalid")
-    if provenance["schema_version"] == 8 and (
+    if schema_version == 8 and (
         not _is_revision(provenance.get("training_git_commit"))
         or not _is_revision(provenance.get("runtime_git_commit"))
         or len(provenance["training_git_commit"]) != 40
