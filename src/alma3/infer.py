@@ -44,11 +44,20 @@ EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
 _RESULT_CSV_FIELDS = (
     "sample_id",
     "status",
-    "accepted_level",
-    "accepted_label",
-    *(field for level in RESULT_LEVELS for field in (f"{level}_label", f"{level}_score", f"{level}_threshold")),
+    "result_summary",
+    "resolved_level",
+    "resolved_label",
+    "resolved_basis",
+    *(f"{level}_label" for level in RESULT_LEVELS),
     "unresolved_level",
-    "unresolved_threshold",
+    "reporting_threshold",
+    "candidate_1_label",
+    "candidate_1_score",
+    "candidate_2_label",
+    "candidate_2_score",
+    "observed_cpg_count",
+    "minimum_observed_cpgs",
+    "model_version",
 )
 
 
@@ -157,21 +166,45 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
     accepted = result["accepted"] or {}
     decision = result["decision"] or {}
     nodes = {node["level"]: node for node in result["path"]}
+    accepted_node = result["path"][-1] if result["path"] else {}
+    candidates = decision.get("candidates", [])
+    if result["status"] == "classified":
+        summary = f"Classified at {accepted['level']}: {accepted['label']}."
+    elif result["status"] == "tumor_not_detected":
+        summary = "No hematolymphoid tumor signal detected."
+    elif result["status"] == "unresolved":
+        summary = (
+            f"Resolved through {accepted['level']}: {accepted['label']}; "
+            f"{decision['level']} unresolved."
+        )
+    else:
+        summary = "No call: hematolymphoid tumor presence unresolved."
     row: dict[str, Any] = {
         "sample_id": result["sample_id"],
         "status": result["status"],
-        "accepted_level": accepted.get("level", ""),
-        "accepted_label": accepted.get("label", ""),
+        "result_summary": summary,
+        "resolved_level": accepted.get("level", ""),
+        "resolved_label": accepted.get("label", ""),
+        "resolved_basis": (
+            "implied_by_hierarchy"
+            if accepted_node.get("status") == "implied"
+            else "scored"
+            if accepted_node
+            else ""
+        ),
         "unresolved_level": decision.get("level", ""),
-        "unresolved_threshold": decision.get("threshold", ""),
+        "reporting_threshold": decision.get("threshold", ""),
+        "candidate_1_label": candidates[0]["label"] if candidates else "",
+        "candidate_1_score": candidates[0]["score"] if candidates else "",
+        "candidate_2_label": candidates[1]["label"] if candidates else "",
+        "candidate_2_score": candidates[1]["score"] if candidates else "",
+        "observed_cpg_count": result["observed_cpg_count"],
+        "minimum_observed_cpgs": result["minimum_observed_cpgs"],
+        "model_version": result["release"]["version"],
     }
     for level in RESULT_LEVELS:
         node = nodes.get(level, {})
-        score = node.get("score")
-        threshold = node.get("threshold")
         row[f"{level}_label"] = node.get("label", "")
-        row[f"{level}_score"] = "" if score is None else score
-        row[f"{level}_threshold"] = "" if threshold is None else threshold
     return row
 
 

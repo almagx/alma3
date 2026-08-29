@@ -139,8 +139,11 @@ class ALMA3:
         self.thresholds = validated["thresholds"]
         hashes = validated["hashes"]
         self.release_identity = {
+            "version": validated["release"]["version"],
+            "manifest_sha256": validated["manifest_sha256"],
             "model_sha256": hashes["model.safetensors"],
             "taxonomy_sha256": hashes["taxonomy.json"],
+            "cpg_manifest_sha256": hashes["cpg_manifest.json"],
             "thresholds_sha256": hashes["thresholds.json"],
         }
         self.sidecar_release_identity = {
@@ -201,6 +204,8 @@ class ALMA3:
                 self.thresholds,
                 self.taxonomy,
                 self.release_identity,
+                observed_cpg_counts=observed_counts,
+                minimum_observed_cpgs=self.minimum_observed_cpgs,
             )
         return results, embedding, observed_counts
 

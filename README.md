@@ -90,14 +90,16 @@ pip install alma3
 
 ## Results
 
-ALMA3 writes one ordered result per sample. A `.jsonl` output preserves the complete result; a `.csv` output provides the accepted hierarchy, scores, thresholds, and unresolved level as a flat table.
+ALMA3 writes one ordered result per sample. A `.jsonl` output preserves the complete resolved hierarchy and exact release hashes. A `.csv` output provides a clinician-readable summary, resolved labels, unresolved differential, CpG support, and model version.
 
 - `classified`: a diagnostic label was accepted.
-- `tumor_not_detected`: tumor absence was accepted.
+- `tumor_not_detected`: no hematolymphoid tumor signal was detected.
 - `unresolved`: tumor presence was accepted but a later level was not.
 - `no_call`: tumor presence did not meet its threshold.
 
-Outputs are new-only and include the accepted hierarchy, scores, thresholds, and exact model hashes. `--embedding-sidecar path.json` additionally writes the stable same-pass diagnostic representation.
+An unresolved result reports the deepest resolved category and the two leading valid candidates at the next level. Those candidates are informational and are not accepted classifications. A model score ranks labels within one hierarchy branch and is compared with the release's reporting cutoff; it is not an individual patient probability.
+
+Every result records the observed ALMA3 CpGs and the minimum required by the release. Outputs are new-only. `--embedding-sidecar path.json` additionally writes the stable same-pass diagnostic representation.
 
 ## Offline use
 

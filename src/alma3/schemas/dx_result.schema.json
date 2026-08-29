@@ -9,6 +9,8 @@
     "schema_version",
     "sample_id",
     "release",
+    "observed_cpg_count",
+    "minimum_observed_cpgs",
     "status",
     "accepted",
     "path",
@@ -19,6 +21,8 @@
     "schema_version": {"const": 1},
     "sample_id": {"type": "string", "minLength": 1},
     "release": {"$ref": "#/$defs/release"},
+    "observed_cpg_count": {"type": "integer", "minimum": 1},
+    "minimum_observed_cpgs": {"type": "integer", "minimum": 1},
     "status": {
       "enum": ["no_call", "tumor_not_detected", "classified", "unresolved"]
     },
@@ -56,10 +60,20 @@
     "release": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["model_sha256", "taxonomy_sha256", "thresholds_sha256"],
+      "required": [
+        "version",
+        "manifest_sha256",
+        "model_sha256",
+        "taxonomy_sha256",
+        "cpg_manifest_sha256",
+        "thresholds_sha256"
+      ],
       "properties": {
+        "version": {"const": "3.0.0"},
+        "manifest_sha256": {"$ref": "#/$defs/sha256"},
         "model_sha256": {"$ref": "#/$defs/sha256"},
         "taxonomy_sha256": {"$ref": "#/$defs/sha256"},
+        "cpg_manifest_sha256": {"$ref": "#/$defs/sha256"},
         "thresholds_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
@@ -99,11 +113,27 @@
     "unresolvedDecision": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["level", "status", "threshold"],
+      "required": ["level", "status", "threshold", "candidates"],
       "properties": {
         "level": {"$ref": "#/$defs/level"},
         "status": {"const": "unresolved"},
-        "threshold": {"$ref": "#/$defs/probability"}
+        "threshold": {"$ref": "#/$defs/probability"},
+        "candidates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/candidate"}
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "label", "score"],
+      "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "label": {"type": "string", "minLength": 1},
+        "score": {"$ref": "#/$defs/probability"}
       }
     }
   }

@@ -9,6 +9,7 @@ from typing import Any
 import torch
 
 from .dx import DX_TARGETS, PRESENT_LABEL, DxContractError, Taxonomy, apply_temperatures
+from .release import RELEASE_VERSION
 
 RESULT_KIND = "alma3_dx_result"
 RESULT_SCHEMA_VERSION = 1
@@ -22,7 +23,14 @@ TARGET_BY_LEVEL = {
     "subtype": "subtype",
 }
 LEVEL_BY_TARGET = {target: level for level, target in TARGET_BY_LEVEL.items()}
-_RELEASE_FIELDS = {"model_sha256", "taxonomy_sha256", "thresholds_sha256"}
+_RELEASE_HASH_FIELDS = {
+    "manifest_sha256",
+    "model_sha256",
+    "taxonomy_sha256",
+    "cpg_manifest_sha256",
+    "thresholds_sha256",
+}
+_RELEASE_FIELDS = {"version", *_RELEASE_HASH_FIELDS}
 
 
 def result_schema_path() -> Path:
@@ -33,11 +41,16 @@ def _is_sha256(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
 
 
-def _top_candidate(probabilities: torch.Tensor, indices: list[int]) -> tuple[int, float]:
-    return min(
+def _rank_candidates(
+    probabilities: torch.Tensor,
+    indices: list[int],
+    *,
+    limit: int,
+) -> list[tuple[int, float]]:
+    return sorted(
         ((idx, float(probabilities[idx].detach().cpu())) for idx in indices),
         key=lambda item: (-item[1], item[0]),
-    )
+    )[:limit]
 
 
 def _child_indices(level: str, parent_idx: int | None, taxonomy: Taxonomy) -> list[int]:
@@ -74,13 +87,31 @@ def _path_node(
     }
 
 
-def _unresolved_decision(level: str, threshold: float) -> dict[str, Any]:
-    return {"level": level, "status": "unresolved", "threshold": threshold}
+def _unresolved_decision(
+    level: str,
+    threshold: float,
+    ranked: list[tuple[int, float]],
+    taxonomy: Taxonomy,
+) -> dict[str, Any]:
+    if len(ranked) != 2:
+        raise DxContractError(f"{level} unresolved decision requires two candidates")
+    labels = taxonomy.classes[TARGET_BY_LEVEL[level]]
+    return {
+        "level": level,
+        "status": "unresolved",
+        "threshold": threshold,
+        "candidates": [
+            {"index": index, "label": labels[index], "score": score}
+            for index, score in ranked
+        ],
+    }
 
 
 def _result(
     sample_id: str,
     release: dict[str, str],
+    observed_cpg_count: int,
+    minimum_observed_cpgs: int,
     status: str,
     path: list[dict[str, Any]],
     decision: dict[str, Any] | None,
@@ -91,6 +122,8 @@ def _result(
         "schema_version": RESULT_SCHEMA_VERSION,
         "sample_id": sample_id,
         "release": dict(release),
+        "observed_cpg_count": observed_cpg_count,
+        "minimum_observed_cpgs": minimum_observed_cpgs,
         "status": status,
         "accepted": accepted,
         "path": path,
@@ -106,29 +139,51 @@ def results_from_logits(
     thresholds: dict[str, Any],
     taxonomy: Taxonomy,
     release: dict[str, str],
+    *,
+    observed_cpg_counts: Iterable[int],
+    minimum_observed_cpgs: int,
 ) -> list[dict[str, Any]]:
     _validate_release(release)
     scaled = apply_temperatures(logits, thresholds, taxonomy)
     ids = [str(sample_id) for sample_id in sample_ids]
+    observed_counts = list(observed_cpg_counts)
     batch = next(iter(scaled.values())).shape[0]
-    if len(ids) != batch or any(not sample_id for sample_id in ids) or len(ids) != len(set(ids)):
+    if (
+        len(ids) != batch
+        or any(not sample_id for sample_id in ids)
+        or len(ids) != len(set(ids))
+        or len(observed_counts) != batch
+        or type(minimum_observed_cpgs) is not int
+        or minimum_observed_cpgs <= 0
+        or any(type(count) is not int or count < minimum_observed_cpgs for count in observed_counts)
+    ):
         raise DxContractError("result sample IDs must be non-empty, unique, and aligned with logits")
 
     stops = {LEVEL_BY_TARGET[target]: float(thresholds["thresholds"][target]) for target in DX_TARGETS}
     present_idx = taxonomy.classes["hematolymphoid_tumor_presence"].index(PRESENT_LABEL)
     results = []
-    for row_idx, sample_id in enumerate(ids):
+    for row_idx, (sample_id, observed_cpg_count) in enumerate(
+        zip(ids, observed_counts, strict=True)
+    ):
         path: list[dict[str, Any]] = []
         presence = torch.softmax(scaled["hematolymphoid_tumor_presence"][row_idx].float(), dim=-1)
-        presence_pred, presence_score = _top_candidate(presence, list(range(len(presence))))
+        presence_ranked = _rank_candidates(presence, list(range(len(presence))), limit=2)
+        presence_pred, presence_score = presence_ranked[0]
         if presence_score < stops["presence"]:
             results.append(
                 _result(
                     sample_id,
                     release,
+                    observed_cpg_count,
+                    minimum_observed_cpgs,
                     "no_call",
                     path,
-                    _unresolved_decision("presence", stops["presence"]),
+                    _unresolved_decision(
+                        "presence",
+                        stops["presence"],
+                        presence_ranked,
+                        taxonomy,
+                    ),
                 )
             )
             continue
@@ -143,7 +198,17 @@ def results_from_logits(
             )
         )
         if presence_pred != present_idx:
-            results.append(_result(sample_id, release, "tumor_not_detected", path, None))
+            results.append(
+                _result(
+                    sample_id,
+                    release,
+                    observed_cpg_count,
+                    minimum_observed_cpgs,
+                    "tumor_not_detected",
+                    path,
+                    None,
+                )
+            )
             continue
 
         parent_idx: int | None = presence_pred
@@ -164,15 +229,18 @@ def results_from_logits(
             probabilities = torch.softmax(
                 scaled[target][row_idx].float().masked_fill(~mask, -torch.inf), dim=-1
             )
-            pred, score = _top_candidate(probabilities, indices)
+            ranked = _rank_candidates(probabilities, indices, limit=2)
+            pred, score = ranked[0]
             if score < stops[level]:
                 results.append(
                     _result(
                         sample_id,
                         release,
+                        observed_cpg_count,
+                        minimum_observed_cpgs,
                         "unresolved",
                         path,
-                        _unresolved_decision(level, stops[level]),
+                        _unresolved_decision(level, stops[level], ranked, taxonomy),
                     )
                 )
                 break
@@ -181,14 +249,26 @@ def results_from_logits(
         else:
             terminal = True
         if terminal:
-            results.append(_result(sample_id, release, "classified", path, None))
+            results.append(
+                _result(
+                    sample_id,
+                    release,
+                    observed_cpg_count,
+                    minimum_observed_cpgs,
+                    "classified",
+                    path,
+                    None,
+                )
+            )
     return results
 
 
 def _validate_release(release: Any) -> None:
     if not isinstance(release, dict) or set(release) != _RELEASE_FIELDS:
         raise DxContractError("result release fields are invalid")
-    for field in _RELEASE_FIELDS:
+    if release["version"] != RELEASE_VERSION:
+        raise DxContractError("result release version is invalid")
+    for field in _RELEASE_HASH_FIELDS:
         if not _is_sha256(release[field]):
             raise DxContractError(f"result release {field} must be a lowercase SHA-256")
 
@@ -216,8 +296,29 @@ def _validate_identity_node(node: Any, description: str) -> None:
         raise DxContractError(f"{description} label is invalid")
 
 
+def _validate_candidate(candidate: Any, description: str) -> None:
+    if not isinstance(candidate, dict) or set(candidate) != {"index", "label", "score"}:
+        raise DxContractError(f"{description} fields are invalid")
+    if type(candidate["index"]) is not int or candidate["index"] < 0:
+        raise DxContractError(f"{description} index is invalid")
+    if not isinstance(candidate["label"], str) or not candidate["label"]:
+        raise DxContractError(f"{description} label is invalid")
+    _validate_score(candidate["score"], f"{description} score")
+
+
 def validate_result(result: Any) -> None:
-    fields = {"kind", "schema_version", "sample_id", "release", "status", "accepted", "path", "decision"}
+    fields = {
+        "kind",
+        "schema_version",
+        "sample_id",
+        "release",
+        "observed_cpg_count",
+        "minimum_observed_cpgs",
+        "status",
+        "accepted",
+        "path",
+        "decision",
+    }
     if not isinstance(result, dict) or set(result) != fields:
         raise DxContractError("Dx result fields are invalid")
     if result["kind"] != RESULT_KIND or result["schema_version"] != RESULT_SCHEMA_VERSION:
@@ -225,6 +326,15 @@ def validate_result(result: Any) -> None:
     if not isinstance(result["sample_id"], str) or not result["sample_id"]:
         raise DxContractError("Dx result sample_id is invalid")
     _validate_release(result["release"])
+    observed_count = result["observed_cpg_count"]
+    minimum_observed = result["minimum_observed_cpgs"]
+    if (
+        type(observed_count) is not int
+        or type(minimum_observed) is not int
+        or minimum_observed <= 0
+        or observed_count < minimum_observed
+    ):
+        raise DxContractError("Dx result observed-CpG support is invalid")
     if result["status"] not in RESULT_STATUSES:
         raise DxContractError("Dx result status is invalid")
 
@@ -263,7 +373,12 @@ def validate_result(result: Any) -> None:
 
     decision = result["decision"]
     if decision is not None:
-        if not isinstance(decision, dict) or set(decision) != {"level", "status", "threshold"}:
+        if not isinstance(decision, dict) or set(decision) != {
+            "level",
+            "status",
+            "threshold",
+            "candidates",
+        }:
             raise DxContractError("Dx result decision fields are invalid")
         if decision["status"] != "unresolved":
             raise DxContractError("Dx result decision status is invalid")
@@ -271,6 +386,21 @@ def validate_result(result: Any) -> None:
         if next_position >= len(RESULT_LEVELS) or decision["level"] != RESULT_LEVELS[next_position]:
             raise DxContractError("Dx result decision must be the first unresolved level")
         _validate_score(decision["threshold"], "Dx result decision threshold")
+        candidates = decision["candidates"]
+        if not isinstance(candidates, list) or len(candidates) != 2:
+            raise DxContractError("Dx result decision must contain two candidates")
+        for position, candidate in enumerate(candidates, start=1):
+            _validate_candidate(candidate, f"Dx result decision candidate {position}")
+        if len({candidate["index"] for candidate in candidates}) != 2:
+            raise DxContractError("Dx result decision candidate indices must be unique")
+        expected_order = sorted(
+            candidates,
+            key=lambda candidate: (-float(candidate["score"]), candidate["index"]),
+        )
+        if candidates != expected_order:
+            raise DxContractError("Dx result decision candidates are not ranked deterministically")
+        if float(candidates[0]["score"]) >= float(decision["threshold"]):
+            raise DxContractError("Dx result unresolved candidate meets its reporting threshold")
 
     expected_decision = result["status"] in ("no_call", "unresolved")
     if (decision is not None) is not expected_decision:
@@ -279,6 +409,10 @@ def validate_result(result: Any) -> None:
         accepted is not None or path or decision["level"] != "presence"
     ):
         raise DxContractError("no_call must stop at tumor presence")
+    if result["status"] == "no_call" and {
+        candidate["label"] for candidate in decision["candidates"]
+    } != {"absent", PRESENT_LABEL}:
+        raise DxContractError("no_call must report the absent and present candidates")
     if result["status"] != "no_call" and accepted is None:
         raise DxContractError("issued Dx results require an accepted node")
     if result["status"] == "tumor_not_detected" and (
