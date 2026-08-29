@@ -73,10 +73,7 @@ A partially resolved result retains the deepest resolved classification and prov
 from alma3 import ALMA3
 
 model = ALMA3()
-results = model.predict_bedmethyl(
-    ["sample-1.bed", "sample-2.bed"],
-    batch_size=2,
-)
+results = model.predict_bedmethyl(["sample-1.bed", "sample-2.bed"])
 ```
 
 For an in-memory matrix:
@@ -101,15 +98,17 @@ pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
 pip install alma3
 ```
 
-On a 30-vCPU x86-64 host, the ten-sample demo completed in 46.99 seconds with the official MKL-enabled wheel. A non-MKL build took more than 20 minutes; ALMA3 warns when it detects that configuration.
+CPU inference requires no NVIDIA hardware. Provide at least 16 GB of system memory. ALMA3 stops with a direct reinstall command if an unsupported x86-64 PyTorch build is detected.
 
-Use an NVIDIA GPU for repeated inference or larger cohorts. Install the PyTorch 2.7.0 CUDA build that matches the system, then install ALMA3 and select the GPU:
+Use an NVIDIA GPU for repeated inference or larger cohorts. Install the tested CUDA 12.8 PyTorch wheel before ALMA3:
 
 ```bash
-alma3 infer -i cohort.csv -o results.csv --device cuda:0
+pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128
+pip install alma3
+alma3 infer -i cohort.csv -o results.csv
 ```
 
-The 3.9 GB weights must fit in memory alongside inference tensors. Start with the default batch size of 2 and increase it only after checking GPU memory and throughput. Process multiple samples together so the model is loaded once, and benchmark a representative batch before choosing a larger batch size.
+Use a GPU with at least 16 GB of memory and start inference with at least 14 GB available. `device="auto"` uses CUDA when available. ALMA3 checks this memory before loading the model and does not switch silently to CPU after a CUDA failure. Process multiple samples in one command, or reuse one `ALMA3` Python object, so the 3.9 GB model is downloaded and loaded only once.
 
 ## Docker
 

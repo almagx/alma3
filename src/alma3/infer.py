@@ -671,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
         "--batch-size",
         type=int,
         default=DEFAULT_INFERENCE_BATCH_SIZE,
-        help="samples evaluated together",
+        help="advanced override for samples evaluated together",
     )
     args = parser.parse_args(argv)
     input_format = args.format or infer_input_format(args.input)

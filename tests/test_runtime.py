@@ -10,7 +10,6 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import warnings
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
@@ -40,7 +39,15 @@ from alma3.infer import (
 from alma3.infer import main as infer_main
 from alma3.model import FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
-from alma3.runtime import _align_array_batch, _prepare_array_values, _warn_if_slow_cpu_build
+from alma3.runtime import (
+    CPU_TORCH_INSTALL_COMMAND,
+    MINIMUM_CUDA_AVAILABLE_MEMORY_BYTES,
+    MINIMUM_CUDA_TOTAL_MEMORY_BYTES,
+    _align_array_batch,
+    _prepare_array_values,
+    _require_supported_cpu_build,
+    _require_supported_cuda_memory,
+)
 from tests.helpers import (
     create_release,
     foundation_config,
@@ -69,22 +76,52 @@ def _assert_json_close(test: unittest.TestCase, left, right, *, atol: float = 1e
 
 
 class RuntimeContractTests(unittest.TestCase):
-    def test_slow_x86_cpu_torch_build_warns_at_model_load(self) -> None:
+    def test_x86_cpu_requires_mkl_before_model_load(self) -> None:
         with (
             patch("alma3.runtime.platform.machine", return_value="x86_64"),
             patch("alma3.runtime.torch.__config__.show", return_value="USE_MKL=OFF"),
-            self.assertWarnsRegex(RuntimeWarning, "lacks MKL"),
+            self.assertRaisesRegex(RuntimeError, "requires the official MKL-enabled PyTorch build") as raised,
         ):
-            _warn_if_slow_cpu_build(torch.device("cpu"))
+            _require_supported_cpu_build(torch.device("cpu"))
+        self.assertIn(CPU_TORCH_INSTALL_COMMAND, str(raised.exception))
 
         with (
             patch("alma3.runtime.platform.machine", return_value="x86_64"),
             patch("alma3.runtime.torch.__config__.show", return_value="USE_MKL=ON"),
-            warnings.catch_warnings(record=True) as caught,
         ):
-            warnings.simplefilter("always")
-            _warn_if_slow_cpu_build(torch.device("cpu"))
-        self.assertEqual(caught, [])
+            _require_supported_cpu_build(torch.device("cpu"))
+
+        with (
+            patch("alma3.runtime.platform.machine", return_value="x86_64"),
+            patch("alma3.runtime.torch.__config__.show", return_value="USE_MKL=OFF"),
+        ):
+            _require_supported_cpu_build(torch.device("cuda", 0))
+
+    def test_cuda_memory_is_checked_before_model_load(self) -> None:
+        gib = 1024**3
+        with patch(
+            "alma3.runtime.torch.cuda.mem_get_info",
+            return_value=(MINIMUM_CUDA_AVAILABLE_MEMORY_BYTES, MINIMUM_CUDA_TOTAL_MEMORY_BYTES),
+        ):
+            _require_supported_cuda_memory(torch.device("cuda", 0))
+
+        with (
+            patch("alma3.runtime.torch.cuda.mem_get_info", return_value=(15 * gib, 15 * gib)),
+            self.assertRaisesRegex(RuntimeError, "at least 16 GiB") as too_small,
+        ):
+            _require_supported_cuda_memory(torch.device("cuda", 0))
+        self.assertIn("reports 15.0 GiB", str(too_small.exception))
+
+        with (
+            patch("alma3.runtime.torch.cuda.mem_get_info", return_value=(13 * gib, 16 * gib)),
+            self.assertRaisesRegex(RuntimeError, "at least 14 GiB of available GPU memory") as too_busy,
+        ):
+            _require_supported_cuda_memory(torch.device("cuda", 0))
+        self.assertIn("has 13.0 GiB available", str(too_busy.exception))
+
+        with patch("alma3.runtime.torch.cuda.mem_get_info") as memory:
+            _require_supported_cuda_memory(torch.device("cpu"))
+        memory.assert_not_called()
 
     def test_bedmethyl_coordinate_index_is_cached_and_preserves_duplicate_probes(self) -> None:
         manifest = CpGManifest(

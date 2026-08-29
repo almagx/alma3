@@ -14,19 +14,39 @@ from .download import load_release
 from .sitewise import real_coverage_presentation
 
 DEFAULT_BATCH_SIZE = 2
+MINIMUM_CUDA_TOTAL_MEMORY_BYTES = 16 * 1024**3
+MINIMUM_CUDA_AVAILABLE_MEMORY_BYTES = 14 * 1024**3
+CPU_TORCH_INSTALL_COMMAND = (
+    "python -m pip install --force-reinstall torch==2.7.0 "
+    "--index-url https://download.pytorch.org/whl/cpu"
+)
 
 
-def _warn_if_slow_cpu_build(device: torch.device) -> None:
+def _require_supported_cpu_build(device: torch.device) -> None:
     if (
         device.type == "cpu"
         and platform.machine().lower() in {"amd64", "x86_64"}
-        and "USE_MKL=OFF" in torch.__config__.show()
+        and "USE_MKL=ON" not in torch.__config__.show()
     ):
-        warnings.warn(
-            "This PyTorch build lacks MKL; ALMA3 CPU inference may be much slower. "
-            "Install the official PyTorch CPU wheel.",
-            RuntimeWarning,
-            stacklevel=3,
+        raise RuntimeError(
+            "ALMA3 CPU inference on x86-64 requires the official MKL-enabled PyTorch build. "
+            f"Reinstall it with:\n{CPU_TORCH_INSTALL_COMMAND}"
+        )
+
+
+def _require_supported_cuda_memory(device: torch.device) -> None:
+    if device.type != "cuda":
+        return
+    available, total = torch.cuda.mem_get_info(device)
+    if total < MINIMUM_CUDA_TOTAL_MEMORY_BYTES:
+        raise RuntimeError(
+            "ALMA3 requires an NVIDIA GPU with at least 16 GiB of memory; "
+            f"{device} reports {total / 1024**3:.1f} GiB"
+        )
+    if available < MINIMUM_CUDA_AVAILABLE_MEMORY_BYTES:
+        raise RuntimeError(
+            "ALMA3 requires at least 14 GiB of available GPU memory before loading the model; "
+            f"{device} has {available / 1024**3:.1f} GiB available. Stop other GPU processes and retry."
         )
 
 
@@ -145,7 +165,8 @@ class ALMA3:
         """Load a release from an explicit path, configured path, cache, or verified download."""
 
         self.device = resolve_device(device)
-        _warn_if_slow_cpu_build(self.device)
+        _require_supported_cpu_build(self.device)
+        _require_supported_cuda_memory(self.device)
         validated = load_release(artifact, device=str(self.device))
         self.artifact = validated["root"]
         self._validated = validated
