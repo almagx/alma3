@@ -92,16 +92,16 @@ On the same 30-vCPU x86-64 host, the ten-sample demo took 46.99 seconds with the
 
 ## Results
 
-ALMA3 writes one ordered result per sample. A `.jsonl` output preserves the complete resolved hierarchy and exact release hashes. A `.csv` output provides a clinician-readable summary, resolved labels, unresolved differential, CpG support, and model version.
+ALMA3 writes one ordered result per sample. JSONL preserves the complete resolved hierarchy and exact release hashes. CSV provides a clinician-readable summary, resolved classifications, any next-level differential, observed CpG support, and model version.
 
-- `classified`: a diagnostic label was accepted.
+- `classified`: the applicable hierarchy was fully resolved.
 - `tumor_not_detected`: no hematolymphoid tumor signal was detected.
-- `unresolved`: tumor presence was accepted but a later level was not.
-- `no_call`: tumor presence did not meet its threshold.
+- `partially_resolved`: tumor presence and at least one later level were resolved, but the next level did not reach its reporting cutoff.
+- `no_call`: tumor presence did not meet its reporting cutoff.
 
-An unresolved result reports the deepest resolved category and the two leading valid candidates at the next level. Those candidates are informational and are not accepted classifications. A model score ranks labels within one hierarchy branch and is compared with the release's reporting cutoff; it is not an individual patient probability.
+A partially resolved result retains the deepest resolved classification and reports the two leading valid classifications at the next level as an informational differential. A model score ranks classifications within that branch; it is not an individual patient probability.
 
-Every result records the observed ALMA3 CpGs and the minimum required by the release. Outputs are new-only. `--embedding-sidecar path.json` additionally writes the stable same-pass diagnostic representation.
+JSONL records both the observed ALMA3 CpGs and the minimum required by the release. CSV shows the observed count without repeating the fixed minimum. Outputs are new-only. `--embedding-sidecar path.json` additionally writes the stable same-pass diagnostic representation.
 
 ## Offline use
 
@@ -130,7 +130,7 @@ docker build \
   -t alma3:3.0.0 .
 ```
 
-Official diagnostic maps and integrated reports are available through ALMAGX. This runtime contains no training data, training labels, or map assets.
+Official diagnostic maps and integrated reports are available through ALMAGX. This runtime contains no training data, training annotations, or map assets.
 
 ## License
 

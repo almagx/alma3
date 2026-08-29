@@ -13,7 +13,7 @@ from .release import RELEASE_VERSION
 
 RESULT_KIND = "alma3_dx_result"
 RESULT_SCHEMA_VERSION = 1
-RESULT_STATUSES = ("no_call", "tumor_not_detected", "classified", "unresolved")
+RESULT_STATUSES = ("no_call", "tumor_not_detected", "classified", "partially_resolved")
 RESULT_LEVELS = ("presence", "lineage", "family", "type", "subtype")
 TARGET_BY_LEVEL = {
     "presence": "hematolymphoid_tumor_presence",
@@ -81,9 +81,9 @@ def _path_node(
         "level": level,
         "status": status,
         "index": index,
-        "label": taxonomy.classes[TARGET_BY_LEVEL[level]][index],
-        "score": score,
-        "threshold": threshold,
+        "classification": taxonomy.classes[TARGET_BY_LEVEL[level]][index],
+        "model_score": score,
+        "reporting_cutoff": threshold,
     }
 
 
@@ -94,14 +94,14 @@ def _unresolved_decision(
     taxonomy: Taxonomy,
 ) -> dict[str, Any]:
     if len(ranked) != 2:
-        raise DxContractError(f"{level} unresolved decision requires two candidates")
+        raise DxContractError(f"{level} unresolved decision requires a two-class differential")
     labels = taxonomy.classes[TARGET_BY_LEVEL[level]]
     return {
         "level": level,
         "status": "unresolved",
-        "threshold": threshold,
-        "candidates": [
-            {"index": index, "label": labels[index], "score": score}
+        "reporting_cutoff": threshold,
+        "differential": [
+            {"index": index, "classification": labels[index], "model_score": score}
             for index, score in ranked
         ],
     }
@@ -116,7 +116,11 @@ def _result(
     path: list[dict[str, Any]],
     decision: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    accepted = None if not path else {key: path[-1][key] for key in ("level", "index", "label")}
+    accepted = (
+        None
+        if not path
+        else {key: path[-1][key] for key in ("level", "index", "classification")}
+    )
     result = {
         "kind": RESULT_KIND,
         "schema_version": RESULT_SCHEMA_VERSION,
@@ -238,7 +242,7 @@ def results_from_logits(
                         release,
                         observed_cpg_count,
                         minimum_observed_cpgs,
-                        "unresolved",
+                        "partially_resolved",
                         path,
                         _unresolved_decision(level, stops[level], ranked, taxonomy),
                     )
@@ -286,24 +290,24 @@ def _validate_score(value: Any, description: str, *, nullable: bool = False) -> 
 
 
 def _validate_identity_node(node: Any, description: str) -> None:
-    if not isinstance(node, dict) or set(node) != {"level", "index", "label"}:
+    if not isinstance(node, dict) or set(node) != {"level", "index", "classification"}:
         raise DxContractError(f"{description} fields are invalid")
     if node["level"] not in RESULT_LEVELS:
         raise DxContractError(f"{description} level is invalid")
     if type(node["index"]) is not int or node["index"] < 0:
         raise DxContractError(f"{description} index is invalid")
-    if not isinstance(node["label"], str) or not node["label"]:
-        raise DxContractError(f"{description} label is invalid")
+    if not isinstance(node["classification"], str) or not node["classification"]:
+        raise DxContractError(f"{description} classification is invalid")
 
 
-def _validate_candidate(candidate: Any, description: str) -> None:
-    if not isinstance(candidate, dict) or set(candidate) != {"index", "label", "score"}:
+def _validate_differential_entry(entry: Any, description: str) -> None:
+    if not isinstance(entry, dict) or set(entry) != {"index", "classification", "model_score"}:
         raise DxContractError(f"{description} fields are invalid")
-    if type(candidate["index"]) is not int or candidate["index"] < 0:
+    if type(entry["index"]) is not int or entry["index"] < 0:
         raise DxContractError(f"{description} index is invalid")
-    if not isinstance(candidate["label"], str) or not candidate["label"]:
-        raise DxContractError(f"{description} label is invalid")
-    _validate_score(candidate["score"], f"{description} score")
+    if not isinstance(entry["classification"], str) or not entry["classification"]:
+        raise DxContractError(f"{description} classification is invalid")
+    _validate_score(entry["model_score"], f"{description} model score")
 
 
 def validate_result(result: Any) -> None:
@@ -342,7 +346,14 @@ def validate_result(result: Any) -> None:
     if not isinstance(path, list) or len(path) > len(RESULT_LEVELS):
         raise DxContractError("Dx result path is invalid")
     for position, node in enumerate(path):
-        node_fields = {"level", "status", "index", "label", "score", "threshold"}
+        node_fields = {
+            "level",
+            "status",
+            "index",
+            "classification",
+            "model_score",
+            "reporting_cutoff",
+        }
         if not isinstance(node, dict) or set(node) != node_fields:
             raise DxContractError("Dx result path node fields are invalid")
         if node["level"] != RESULT_LEVELS[position]:
@@ -353,14 +364,16 @@ def validate_result(result: Any) -> None:
             raise DxContractError("tumor presence cannot be implied")
         if type(node["index"]) is not int or node["index"] < 0:
             raise DxContractError("Dx result path node index is invalid")
-        if not isinstance(node["label"], str) or not node["label"]:
-            raise DxContractError("Dx result path node label is invalid")
+        if not isinstance(node["classification"], str) or not node["classification"]:
+            raise DxContractError("Dx result path node classification is invalid")
         if node["status"] == "implied":
-            if node["score"] is not None or node["threshold"] is not None:
-                raise DxContractError("implied Dx result nodes must have null score and threshold")
+            if node["model_score"] is not None or node["reporting_cutoff"] is not None:
+                raise DxContractError(
+                    "implied Dx result nodes must have null model score and reporting cutoff"
+                )
         else:
-            _validate_score(node["score"], "Dx result path score")
-            _validate_score(node["threshold"], "Dx result path threshold")
+            _validate_score(node["model_score"], "Dx result path model score")
+            _validate_score(node["reporting_cutoff"], "Dx result path reporting cutoff")
 
     accepted = result["accepted"]
     if accepted is None:
@@ -368,7 +381,9 @@ def validate_result(result: Any) -> None:
             raise DxContractError("Dx result with a path requires accepted")
     else:
         _validate_identity_node(accepted, "Dx result accepted")
-        if not path or accepted != {key: path[-1][key] for key in ("level", "index", "label")}:
+        if not path or accepted != {
+            key: path[-1][key] for key in ("level", "index", "classification")
+        }:
             raise DxContractError("Dx result accepted must equal the last path node")
 
     decision = result["decision"]
@@ -376,8 +391,8 @@ def validate_result(result: Any) -> None:
         if not isinstance(decision, dict) or set(decision) != {
             "level",
             "status",
-            "threshold",
-            "candidates",
+            "reporting_cutoff",
+            "differential",
         }:
             raise DxContractError("Dx result decision fields are invalid")
         if decision["status"] != "unresolved":
@@ -385,24 +400,26 @@ def validate_result(result: Any) -> None:
         next_position = len(path)
         if next_position >= len(RESULT_LEVELS) or decision["level"] != RESULT_LEVELS[next_position]:
             raise DxContractError("Dx result decision must be the first unresolved level")
-        _validate_score(decision["threshold"], "Dx result decision threshold")
-        candidates = decision["candidates"]
-        if not isinstance(candidates, list) or len(candidates) != 2:
-            raise DxContractError("Dx result decision must contain two candidates")
-        for position, candidate in enumerate(candidates, start=1):
-            _validate_candidate(candidate, f"Dx result decision candidate {position}")
-        if len({candidate["index"] for candidate in candidates}) != 2:
-            raise DxContractError("Dx result decision candidate indices must be unique")
+        _validate_score(decision["reporting_cutoff"], "Dx result decision reporting cutoff")
+        differential = decision["differential"]
+        if not isinstance(differential, list) or len(differential) != 2:
+            raise DxContractError("Dx result decision must contain a two-class differential")
+        for position, entry in enumerate(differential, start=1):
+            _validate_differential_entry(entry, f"Dx result differential entry {position}")
+        if len({entry["index"] for entry in differential}) != 2:
+            raise DxContractError("Dx result differential indices must be unique")
         expected_order = sorted(
-            candidates,
-            key=lambda candidate: (-float(candidate["score"]), candidate["index"]),
+            differential,
+            key=lambda entry: (-float(entry["model_score"]), entry["index"]),
         )
-        if candidates != expected_order:
-            raise DxContractError("Dx result decision candidates are not ranked deterministically")
-        if float(candidates[0]["score"]) >= float(decision["threshold"]):
-            raise DxContractError("Dx result unresolved candidate meets its reporting threshold")
+        if differential != expected_order:
+            raise DxContractError("Dx result differential is not ranked deterministically")
+        if float(differential[0]["model_score"]) >= float(decision["reporting_cutoff"]):
+            raise DxContractError(
+                "Dx result unresolved classification meets its reporting cutoff"
+            )
 
-    expected_decision = result["status"] in ("no_call", "unresolved")
+    expected_decision = result["status"] in ("no_call", "partially_resolved")
     if (decision is not None) is not expected_decision:
         raise DxContractError("Dx result status and decision are inconsistent")
     if result["status"] == "no_call" and (
@@ -410,17 +427,17 @@ def validate_result(result: Any) -> None:
     ):
         raise DxContractError("no_call must stop at tumor presence")
     if result["status"] == "no_call" and {
-        candidate["label"] for candidate in decision["candidates"]
+        entry["classification"] for entry in decision["differential"]
     } != {"absent", PRESENT_LABEL}:
-        raise DxContractError("no_call must report the absent and present candidates")
+        raise DxContractError("no_call must report absent and present in its differential")
     if result["status"] != "no_call" and accepted is None:
         raise DxContractError("issued Dx results require an accepted node")
     if result["status"] == "tumor_not_detected" and (
-        len(path) != 1 or path[0]["label"] != "absent"
+        len(path) != 1 or path[0]["classification"] != "absent"
     ):
         raise DxContractError("tumor_not_detected must stop after tumor presence")
-    if result["status"] in ("classified", "unresolved") and (
-        not path or path[0]["label"] != PRESENT_LABEL
+    if result["status"] in ("classified", "partially_resolved") and (
+        not path or path[0]["classification"] != PRESENT_LABEL
     ):
         raise DxContractError("classified Dx results require an issued present tumor signal")
 

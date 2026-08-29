@@ -7,7 +7,7 @@ import torch
 
 from alma3.clinical_result import RESULT_LEVELS, results_from_logits, validate_result
 from alma3.dx import DX_TARGETS, DxContractError, Taxonomy
-from alma3.infer import _result_csv_row
+from alma3.infer import _RESULT_CSV_FIELDS, _result_csv_row
 from tests.helpers import taxonomy_payload
 
 
@@ -142,26 +142,46 @@ def _result(
 
 
 class ClinicalResultContractTests(unittest.TestCase):
-    def test_every_unresolved_level_reports_two_ranked_valid_candidates(self) -> None:
+    def test_every_unresolved_level_reports_two_ranked_valid_differential_entries(self) -> None:
         taxonomy = _taxonomy()
         for level_index, level in enumerate(RESULT_LEVELS):
             with self.subTest(level=level):
                 result = _result(unresolved_level=level, taxonomy=taxonomy)
-                self.assertEqual(result["status"], "no_call" if level == "presence" else "unresolved")
+                self.assertEqual(
+                    result["status"],
+                    "no_call" if level == "presence" else "partially_resolved",
+                )
                 self.assertEqual(result["decision"]["level"], level)
                 self.assertEqual(len(result["path"]), level_index)
-                candidates = result["decision"]["candidates"]
-                self.assertEqual(len(candidates), 2)
-                self.assertGreater(candidates[0]["score"], candidates[1]["score"])
-                self.assertLess(candidates[0]["score"], result["decision"]["threshold"])
+                differential = result["decision"]["differential"]
+                self.assertEqual(len(differential), 2)
+                self.assertGreater(
+                    differential[0]["model_score"], differential[1]["model_score"]
+                )
+                self.assertLess(
+                    differential[0]["model_score"],
+                    result["decision"]["reporting_cutoff"],
+                )
                 if level == "presence":
-                    self.assertEqual([candidate["label"] for candidate in candidates], ["absent", "present"])
+                    self.assertEqual(
+                        [entry["classification"] for entry in differential],
+                        ["absent", "present"],
+                    )
                 elif level == "family":
-                    self.assertEqual([candidate["label"] for candidate in candidates], ["m1", "m2"])
+                    self.assertEqual(
+                        [entry["classification"] for entry in differential],
+                        ["m1", "m2"],
+                    )
                 elif level == "type":
-                    self.assertEqual([candidate["label"] for candidate in candidates], ["m1t1", "m1t2"])
+                    self.assertEqual(
+                        [entry["classification"] for entry in differential],
+                        ["m1t1", "m1t2"],
+                    )
                 elif level == "subtype":
-                    self.assertEqual([candidate["label"] for candidate in candidates], ["m1t1s1", "m1t1s2"])
+                    self.assertEqual(
+                        [entry["classification"] for entry in differential],
+                        ["m1t1s1", "m1t1s2"],
+                    )
 
     def test_ties_are_broken_by_taxonomy_index(self) -> None:
         taxonomy = _taxonomy()
@@ -177,43 +197,71 @@ class ClinicalResultContractTests(unittest.TestCase):
             minimum_observed_cpgs=1500,
         )[0]
         self.assertEqual(
-            [candidate["index"] for candidate in result["decision"]["candidates"]],
+            [entry["index"] for entry in result["decision"]["differential"]],
             [0, 1],
         )
 
     def test_csv_is_clinician_centered_for_each_status(self) -> None:
+        self.assertEqual(
+            _RESULT_CSV_FIELDS,
+            (
+                "sample_id",
+                "result_summary",
+                "resolved_level",
+                "resolved_classification",
+                "resolved_basis",
+                "tumor_presence",
+                "lineage",
+                "family",
+                "type",
+                "subtype",
+                "unresolved_level",
+                "reporting_cutoff",
+                "differential_1_classification",
+                "differential_1_model_score",
+                "differential_2_classification",
+                "differential_2_model_score",
+                "observed_cpg_count",
+                "model_version",
+            ),
+        )
         classified = _result()
         tumor_absent = _result(tumor_absent=True)
-        unresolved = _result(unresolved_level="subtype")
+        partially_resolved = _result(unresolved_level="subtype")
         no_call = _result(unresolved_level="presence")
 
         classified_row = _result_csv_row(classified)
-        self.assertEqual(classified_row["result_summary"], "Classified at subtype: m1t1s1.")
+        self.assertEqual(
+            classified_row["result_summary"],
+            "Resolved through subtype: m1t1s1.",
+        )
         self.assertEqual(classified_row["resolved_basis"], "scored")
-        self.assertEqual(classified_row["candidate_1_label"], "")
+        self.assertEqual(classified_row["differential_1_classification"], "")
 
         absent_row = _result_csv_row(tumor_absent)
         self.assertEqual(absent_row["result_summary"], "No hematolymphoid tumor signal detected.")
-        self.assertEqual(absent_row["resolved_label"], "absent")
+        self.assertEqual(absent_row["resolved_classification"], "absent")
 
-        unresolved_row = _result_csv_row(unresolved)
+        unresolved_row = _result_csv_row(partially_resolved)
         self.assertEqual(
             unresolved_row["result_summary"],
             "Resolved through type: m1t1; subtype unresolved.",
         )
-        self.assertEqual(unresolved_row["candidate_1_label"], "m1t1s1")
-        self.assertEqual(unresolved_row["candidate_2_label"], "m1t1s2")
+        self.assertEqual(unresolved_row["differential_1_classification"], "m1t1s1")
+        self.assertEqual(unresolved_row["differential_2_classification"], "m1t1s2")
         self.assertEqual(unresolved_row["observed_cpg_count"], 2000)
-        self.assertEqual(unresolved_row["minimum_observed_cpgs"], 1500)
         self.assertEqual(unresolved_row["model_version"], "3.0.0")
+        self.assertNotIn("status", unresolved_row)
+        self.assertNotIn("minimum_observed_cpgs", unresolved_row)
+        self.assertFalse(any("label" in field for field in unresolved_row))
 
         no_call_row = _result_csv_row(no_call)
         self.assertEqual(no_call_row["result_summary"], "No call: hematolymphoid tumor presence unresolved.")
-        self.assertEqual(no_call_row["resolved_label"], "")
-        self.assertEqual(no_call_row["candidate_1_label"], "absent")
-        self.assertEqual(no_call_row["candidate_2_label"], "present")
+        self.assertEqual(no_call_row["resolved_classification"], "")
+        self.assertEqual(no_call_row["differential_1_classification"], "absent")
+        self.assertEqual(no_call_row["differential_2_classification"], "present")
 
-    def test_implied_terminal_label_is_explicit_in_csv(self) -> None:
+    def test_implied_terminal_classification_is_explicit_in_csv(self) -> None:
         taxonomy = Taxonomy.from_dict(taxonomy_payload())
         logits = _logits(taxonomy)
         _select(logits, "hematolymphoid_tumor_presence", 1)
@@ -230,17 +278,17 @@ class ClinicalResultContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "classified")
         self.assertEqual(_result_csv_row(result)["resolved_basis"], "implied_by_hierarchy")
 
-    def test_old_result_shape_and_invalid_candidate_order_fail_closed(self) -> None:
+    def test_old_result_shape_and_invalid_differential_order_fail_closed(self) -> None:
         result = _result(unresolved_level="subtype")
         old = copy.deepcopy(result)
         old.pop("observed_cpg_count")
         with self.assertRaisesRegex(DxContractError, "fields are invalid"):
             validate_result(old)
 
-        reversed_candidates = copy.deepcopy(result)
-        reversed_candidates["decision"]["candidates"].reverse()
+        reversed_differential = copy.deepcopy(result)
+        reversed_differential["decision"]["differential"].reverse()
         with self.assertRaisesRegex(DxContractError, "ranked deterministically"):
-            validate_result(reversed_candidates)
+            validate_result(reversed_differential)
 
 
 if __name__ == "__main__":

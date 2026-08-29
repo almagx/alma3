@@ -24,7 +24,7 @@
     "observed_cpg_count": {"type": "integer", "minimum": 1},
     "minimum_observed_cpgs": {"type": "integer", "minimum": 1},
     "status": {
-      "enum": ["no_call", "tumor_not_detected", "classified", "unresolved"]
+      "enum": ["no_call", "tumor_not_detected", "classified", "partially_resolved"]
     },
     "accepted": {
       "oneOf": [
@@ -80,29 +80,29 @@
     "identityNode": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["level", "index", "label"],
+      "required": ["level", "index", "classification"],
       "properties": {
         "level": {"$ref": "#/$defs/level"},
         "index": {"type": "integer", "minimum": 0},
-        "label": {"type": "string", "minLength": 1}
+        "classification": {"type": "string", "minLength": 1}
       }
     },
     "pathNode": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["level", "status", "index", "label", "score", "threshold"],
+      "required": ["level", "status", "index", "classification", "model_score", "reporting_cutoff"],
       "properties": {
         "level": {"$ref": "#/$defs/level"},
         "status": {"enum": ["resolved", "implied"]},
         "index": {"type": "integer", "minimum": 0},
-        "label": {"type": "string", "minLength": 1},
-        "score": {
+        "classification": {"type": "string", "minLength": 1},
+        "model_score": {
           "oneOf": [
             {"type": "null"},
             {"$ref": "#/$defs/probability"}
           ]
         },
-        "threshold": {
+        "reporting_cutoff": {
           "oneOf": [
             {"type": "null"},
             {"$ref": "#/$defs/probability"}
@@ -113,27 +113,27 @@
     "unresolvedDecision": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["level", "status", "threshold", "candidates"],
+      "required": ["level", "status", "reporting_cutoff", "differential"],
       "properties": {
         "level": {"$ref": "#/$defs/level"},
         "status": {"const": "unresolved"},
-        "threshold": {"$ref": "#/$defs/probability"},
-        "candidates": {
+        "reporting_cutoff": {"$ref": "#/$defs/probability"},
+        "differential": {
           "type": "array",
           "minItems": 2,
           "maxItems": 2,
-          "items": {"$ref": "#/$defs/candidate"}
+          "items": {"$ref": "#/$defs/differentialEntry"}
         }
       }
     },
-    "candidate": {
+    "differentialEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["index", "label", "score"],
+      "required": ["index", "classification", "model_score"],
       "properties": {
         "index": {"type": "integer", "minimum": 0},
-        "label": {"type": "string", "minLength": 1},
-        "score": {"$ref": "#/$defs/probability"}
+        "classification": {"type": "string", "minLength": 1},
+        "model_score": {"$ref": "#/$defs/probability"}
       }
     }
   }

@@ -14,7 +14,7 @@ from typing import Any
 
 import torch
 
-from .clinical_result import RESULT_LEVELS, serialize_result, validate_result
+from .clinical_result import serialize_result, validate_result
 from .data import CpGManifest
 from .dx import (
     DX_REPRESENTATION_DIMENSIONS,
@@ -43,20 +43,22 @@ EMBEDDING_SIDECAR_KIND = "alma3_embedding_sidecar"
 EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
 _RESULT_CSV_FIELDS = (
     "sample_id",
-    "status",
     "result_summary",
     "resolved_level",
-    "resolved_label",
+    "resolved_classification",
     "resolved_basis",
-    *(f"{level}_label" for level in RESULT_LEVELS),
+    "tumor_presence",
+    "lineage",
+    "family",
+    "type",
+    "subtype",
     "unresolved_level",
-    "reporting_threshold",
-    "candidate_1_label",
-    "candidate_1_score",
-    "candidate_2_label",
-    "candidate_2_score",
+    "reporting_cutoff",
+    "differential_1_classification",
+    "differential_1_model_score",
+    "differential_2_classification",
+    "differential_2_model_score",
     "observed_cpg_count",
-    "minimum_observed_cpgs",
     "model_version",
 )
 
@@ -167,24 +169,26 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
     decision = result["decision"] or {}
     nodes = {node["level"]: node for node in result["path"]}
     accepted_node = result["path"][-1] if result["path"] else {}
-    candidates = decision.get("candidates", [])
+    differential = decision.get("differential", [])
     if result["status"] == "classified":
-        summary = f"Classified at {accepted['level']}: {accepted['label']}."
+        summary = (
+            f"Resolved through {accepted['level']}: "
+            f"{accepted['classification']}."
+        )
     elif result["status"] == "tumor_not_detected":
         summary = "No hematolymphoid tumor signal detected."
-    elif result["status"] == "unresolved":
+    elif result["status"] == "partially_resolved":
         summary = (
-            f"Resolved through {accepted['level']}: {accepted['label']}; "
+            f"Resolved through {accepted['level']}: {accepted['classification']}; "
             f"{decision['level']} unresolved."
         )
     else:
         summary = "No call: hematolymphoid tumor presence unresolved."
     row: dict[str, Any] = {
         "sample_id": result["sample_id"],
-        "status": result["status"],
         "result_summary": summary,
         "resolved_level": accepted.get("level", ""),
-        "resolved_label": accepted.get("label", ""),
+        "resolved_classification": accepted.get("classification", ""),
         "resolved_basis": (
             "implied_by_hierarchy"
             if accepted_node.get("status") == "implied"
@@ -193,18 +197,31 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
             else ""
         ),
         "unresolved_level": decision.get("level", ""),
-        "reporting_threshold": decision.get("threshold", ""),
-        "candidate_1_label": candidates[0]["label"] if candidates else "",
-        "candidate_1_score": candidates[0]["score"] if candidates else "",
-        "candidate_2_label": candidates[1]["label"] if candidates else "",
-        "candidate_2_score": candidates[1]["score"] if candidates else "",
+        "reporting_cutoff": decision.get("reporting_cutoff", ""),
+        "differential_1_classification": (
+            differential[0]["classification"] if differential else ""
+        ),
+        "differential_1_model_score": (
+            differential[0]["model_score"] if differential else ""
+        ),
+        "differential_2_classification": (
+            differential[1]["classification"] if differential else ""
+        ),
+        "differential_2_model_score": (
+            differential[1]["model_score"] if differential else ""
+        ),
         "observed_cpg_count": result["observed_cpg_count"],
-        "minimum_observed_cpgs": result["minimum_observed_cpgs"],
         "model_version": result["release"]["version"],
     }
-    for level in RESULT_LEVELS:
-        node = nodes.get(level, {})
-        row[f"{level}_label"] = node.get("label", "")
+    row.update(
+        {
+            "tumor_presence": nodes.get("presence", {}).get("classification", ""),
+            "lineage": nodes.get("lineage", {}).get("classification", ""),
+            "family": nodes.get("family", {}).get("classification", ""),
+            "type": nodes.get("type", {}).get("classification", ""),
+            "subtype": nodes.get("subtype", {}).get("classification", ""),
+        }
+    )
     return row
 
 
