@@ -1,171 +1,127 @@
 # ALMA3
 
-ALMA3 is a foundation model for DNA methylation. ALMA3-Dx is the supervised
-diagnostic model built on that foundation. This package runs the released
-ALMA3-Dx model for hierarchical hematolymphoid tumor classification.
+[![Research Use Only](https://img.shields.io/badge/use-research_only-336699)](#license)
+[![Python 3.10–3.12](https://img.shields.io/badge/python-3.10--3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-The first inference downloads the fixed ALMA3 3.0.0 release from
-`models.almagx.com`, verifies every file, and caches it. The model is about
-4.2 GB. Allow at least 5 GB of free disk space. Batch size 1 is the safe
-default; increase it only when memory permits.
+ALMA3 runs hierarchical hematolymphoid tumor classification from DNA methylation data. The released diagnostic model combines the ALMA3 foundation model with its supervised ALMA3-Dx head.
 
-## Command line
-
-ALMA3 supports Python 3.10, 3.11, and 3.12.
+## Quick start
 
 ```bash
 pip install alma3
-
-alma3 infer \
-  --input sample.bed \
-  --format bedmethyl \
-  --output sample.alma3.jsonl
+alma3 demo
 ```
 
-Pass `--input` more than once to process multiple BedMethyl files while loading
-the model once:
+Run your own sample:
+
+```bash
+alma3 infer -i sample.bed -o sample.alma3.jsonl
+```
+
+The first run downloads the fixed model, verifies every file, and caches it. Allow about 5 GB of disk space.
+
+## Inputs
+
+| Input | Filename | Layout |
+|---|---|---|
+| BedMethyl | `.bed` or `.bed.gz` | One GRCh38 sample per file |
+| Array beta matrix | `.csv` or `.csv.gz` | Samples by row, `sample_id` first, CpG IDs as columns |
+
+The format is inferred from the filename. Use `--format array-csv` or `--format bedmethyl` only when an explicit override is useful.
+
+Repeat `-i` to process multiple BedMethyl samples while loading the model once:
 
 ```bash
 alma3 infer \
-  --input sample-1.bed \
-  --input sample-2.bed \
-  --format bedmethyl \
+  -i sample-1.bed \
+  -i sample-2.bed \
   --batch-size 4 \
-  --output cohort.alma3.jsonl
+  -o cohort.alma3.jsonl
 ```
 
-Outputs are new-only: ALMA3 will not replace an existing result. Run
-`alma3 infer --help` for the complete interface.
+Blank and `NaN` array cells are unobserved. Mildly corrected beta matrices are accepted when at least 90% of matched values remain in `[0,1]`, at least 99% remain in `[-0.05,1.05]`, and none exceed `[-0.5,1.5]`. Excursions are bounded to `[0,1]` with a concise notice.
 
-### BedMethyl input
-
-- One sample per `.bed` or `.bed.gz` file.
-- GRCh38 coordinates with chromosome names such as `chr1` and `chrX`.
-- Headerless, tab-delimited rows with at least 11 BedMethyl columns.
-- Column 2 is the zero-based genomic start, column 10 is integer coverage, and
-  column 11 is the modified fraction from 0 to 100.
-- The sample ID is the filename without `.bed` or `.bed.gz`.
-
-### Array CSV input
-
-An array CSV has one sample per row, a `sample_id` first column, and CpG IDs as
-the remaining column names. Missing CpG columns and blank or `NaN` cells are
-unobserved. Extra CpGs not used by the release are ignored.
+For M-values, request the standard conversion explicitly:
 
 ```bash
-alma3 infer \
-  --input cohort.csv \
-  --format array-csv \
-  --output cohort.alma3.jsonl
+alma3 infer -i cohort.csv --input-values mvalue -o cohort.alma3.jsonl
 ```
 
-ALMA3 3.0.0 requires at least 1,500 observed release CpGs per sample.
+Matrices without enough recognized CpGs and values that are not beta-like fail before inference. Gene-expression matrices are not accepted.
 
 ## Python
 
 ```python
 from alma3 import ALMA3
 
-model = ALMA3()
+model = ALMA3(device="cuda:0")
 results = model.predict_bedmethyl(
     ["sample-1.bed", "sample-2.bed"],
     batch_size=2,
 )
-
-for result in results:
-    print(result["sample_id"], result["status"], result["accepted"])
 ```
 
-For an in-memory array:
+For an in-memory matrix:
 
 ```python
 results = model.predict_array(
-    beta,                 # [samples, CpGs]; NaN means unobserved
+    beta,
     cpg_ids,
     sample_ids,
-    batch_size=2,
+    input_values="beta",  # use "mvalue" for explicit M-value conversion
 )
 ```
 
-`device="auto"` uses CUDA when available and otherwise uses the CPU. Use
-`device="cpu"`, `device="cuda:0"`, or another CUDA index to select explicitly.
+The model loads once and preserves sample order. `device="auto"` uses CUDA when available and otherwise uses the CPU.
 
-On Linux, install the CPU-only Torch wheel first when a smaller CPU environment
-is preferred:
+For a smaller CPU environment, install CPU-only Torch first:
 
 ```bash
 pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
 pip install alma3
 ```
 
-For GPU use, install the appropriate CUDA build of Torch 2.7.0 before ALMA3.
+## Results
+
+ALMA3 writes one ordered JSON record per sample:
+
+- `classified`: a diagnostic label was accepted.
+- `tumor_not_detected`: tumor absence was accepted.
+- `unresolved`: tumor presence was accepted but a later level was not.
+- `no_call`: tumor presence did not meet its threshold.
+
+Outputs are new-only and include the accepted hierarchy, scores, thresholds, and exact model hashes. `--embedding-sidecar path.json` additionally writes the stable same-pass diagnostic representation.
+
+## Offline use
+
+```bash
+alma3 download --output /shared/alma3
+alma3 verify-release --artifact /shared/alma3
+alma3 infer --artifact /shared/alma3 -i sample.bed -o sample.alma3.jsonl
+```
+
+Model selection order is: explicit `--artifact`, `ALMA3_RELEASE`, verified cache, then automatic download. An invalid explicit artifact never falls back to another model.
 
 ## Docker
 
-The standalone image is CPU-only and contains the verified model, so it does
-not download anything at runtime:
+The standalone CPU image contains the verified model:
 
 ```bash
-docker run --rm -v "$PWD:/work" alma3:3.0.0 infer \
-  --input /work/sample.bed \
-  --format bedmethyl \
-  --output /work/sample.alma3.jsonl
+docker run --rm -v "$PWD:/work" alma3:3.0.0 \
+  infer -i /work/sample.bed -o /work/sample.alma3.jsonl
 ```
 
-Build the standalone image with the model artifact as a named build context:
+Build it from a local release artifact:
 
 ```bash
 docker build \
-  --build-context alma3_release=/path/to/alma3-3.0.0 \
+  --build-context alma3_release=/path/to/alma3-release \
   -t alma3:3.0.0 .
 ```
 
-The internal weight-free image target is `runtime`.
+Official diagnostic maps and integrated reports are available through ALMAGX. This runtime contains no training data, training labels, or map assets.
 
-## Model download and offline use
-
-Download once to a shared directory, then use that exact copy:
-
-```bash
-alma3 download --output /shared/alma3-3.0.0
-alma3 verify-release --artifact /shared/alma3-3.0.0
-alma3 infer \
-  --artifact /shared/alma3-3.0.0 \
-  --input sample.bed \
-  --format bedmethyl \
-  --output sample.alma3.jsonl
-```
-
-Model selection order is:
-
-1. Explicit `--artifact`
-2. `ALMA3_RELEASE`
-3. Verified cache
-4. Automatic download
-
-An invalid explicit model fails immediately. The default cache is
-`~/.cache/alma3`; set `ALMA3_CACHE_DIR` to move it.
-
-## Results
-
-The canonical output is JSONL with one ordered record per sample:
-
-- `no_call`: tumor presence did not meet its threshold.
-- `tumor_not_detected`: tumor absence was accepted.
-- `classified`: the deepest available terminal label was accepted.
-- `unresolved`: tumor presence was accepted, but a later hierarchy level did
-  not meet its threshold.
-
-Each record contains the accepted label, the resolved hierarchy path, scores,
-thresholds, and exact model hashes. The contract is defined by the
-[result schema](https://github.com/almagx/alma3/blob/main/src/alma3/schemas/dx_result.schema.json).
-
-`--embedding-sidecar path.json` additionally writes the stable 1,536-dimensional
-diagnostic representation from the same inference pass. Its contract is the
-[embedding schema](https://github.com/almagx/alma3/blob/main/src/alma3/schemas/embedding_sidecar.schema.json).
-
-Official two-dimensional diagnostic maps and integrated reports are available
-through the ALMAGX platform. The public runtime does not contain training data,
-training labels, or map assets.
+## License
 
 ALMA3 source and released model weights use the MIT License.

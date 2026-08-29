@@ -1,14 +1,79 @@
 from __future__ import annotations
 
+import math
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import torch
 
 from .clinical_result import results_from_logits
 from .download import load_release
 from .sitewise import real_coverage_presentation
+
+DEFAULT_BATCH_SIZE = 2
+
+
+class _ArrayValueSummary(NamedTuple):
+    observed: int
+    clipped: int
+
+
+def _adjustment_message(summary: _ArrayValueSummary) -> str:
+    return (
+        "Adjusted corrected beta values: clipped "
+        f"{summary.clipped:,}/{summary.observed:,} matched values to [0,1]."
+    )
+
+
+def _prepare_array_values(
+    values: torch.Tensor,
+    sample_ids: Sequence[str],
+    *,
+    input_values: str,
+) -> tuple[torch.Tensor, torch.Tensor, _ArrayValueSummary]:
+    if input_values not in {"beta", "mvalue"}:
+        raise ValueError("input_values must be beta or mvalue")
+    matched = values.detach().to(device="cpu", dtype=torch.float32)
+    if bool(torch.isinf(matched).any().item()):
+        raise ValueError("array values must not contain infinity")
+    finite = torch.isfinite(matched)
+    observed_count = int(finite.sum().item())
+    if input_values == "mvalue":
+        converted = torch.sigmoid(matched * math.log(2.0))
+        return converted, finite, _ArrayValueSummary(observed_count, 0)
+
+    clipped_count = 0
+    ids = [str(value) for value in sample_ids]
+    if len(ids) != matched.shape[0]:
+        raise ValueError("sample IDs must match array rows")
+    for sample_id, row, row_finite in zip(ids, matched, finite, strict=True):
+        observed = row[row_finite]
+        if observed.numel() == 0:
+            continue
+        inside = (observed >= 0) & (observed <= 1)
+        outside_count = int((~inside).sum().item())
+        if outside_count == 0:
+            continue
+        near = (observed >= -0.05) & (observed <= 1.05)
+        count = int(observed.numel())
+        minimum = float(observed.min().item())
+        maximum = float(observed.max().item())
+        beta_like = (
+            int(inside.sum().item()) * 10 >= count * 9
+            and int(near.sum().item()) * 100 >= count * 99
+            and minimum >= -0.5
+            and maximum <= 1.5
+        )
+        if not beta_like:
+            outside_percent = 100.0 * outside_count / count
+            raise ValueError(
+                f"sample {sample_id!r} is not beta-like: {outside_percent:.1f}% outside [0,1], "
+                f"range {minimum:g} to {maximum:g}; if these are M-values, use --input-values mvalue"
+            )
+        clipped_count += outside_count
+    return matched.clamp(0, 1), finite, _ArrayValueSummary(observed_count, clipped_count)
 
 
 def resolve_device(value: str) -> torch.device:
@@ -41,18 +106,21 @@ def _align_array_batch(
     source_indices: torch.Tensor,
     target_indices: torch.Tensor,
     target_width: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    matched = values[:, source_indices].detach().to(device="cpu", dtype=torch.float32)
-    if bool(torch.isinf(matched).any().item()):
-        raise ValueError("beta values must not contain infinity")
-    finite = torch.isfinite(matched)
-    if bool(((matched[finite] < 0) | (matched[finite] > 1)).any().item()):
-        raise ValueError("observed beta values must be in [0, 1]")
+    *,
+    input_values: str = "beta",
+    sample_ids: Sequence[str] | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, _ArrayValueSummary]:
+    ids = [f"sample-{index + 1}" for index in range(values.shape[0])] if sample_ids is None else sample_ids
+    matched, finite, summary = _prepare_array_values(
+        values[:, source_indices],
+        ids,
+        input_values=input_values,
+    )
     aligned = torch.zeros((values.shape[0], target_width), dtype=torch.float32)
     observed = torch.zeros_like(aligned, dtype=torch.bool)
     aligned[:, target_indices] = torch.where(finite, matched, 0.0)
     observed[:, target_indices] = finite
-    return aligned, observed
+    return aligned, observed, summary
 
 
 class ALMA3:
@@ -140,7 +208,7 @@ class ALMA3:
         self,
         inputs: str | Path | Sequence[str | Path],
         *,
-        batch_size: int = 1,
+        batch_size: int = DEFAULT_BATCH_SIZE,
     ) -> list[dict[str, Any]]:
         """Predict one sample per BedMethyl file while preserving the supplied file order."""
 
@@ -194,7 +262,8 @@ class ALMA3:
         cpg_ids: Sequence[str],
         sample_ids: Sequence[str] | None = None,
         *,
-        batch_size: int = 1,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        input_values: str = "beta",
     ) -> list[dict[str, Any]]:
         """Predict rows of beta values aligned by CpG ID; NaN values are unobserved."""
 
@@ -225,8 +294,11 @@ class ALMA3:
             for source_index, name in enumerate(columns)
             if (target_index := self.cpg.cpg_index.get(name)) is not None
         ]
-        if not matched:
-            raise ValueError("cpg_ids do not contain any CpGs used by the release")
+        if len(matched) < self.minimum_observed_cpgs:
+            raise ValueError(
+                f"found {len(matched):,} ALMA3 CpGs; at least {self.minimum_observed_cpgs:,} are required. "
+                "Gene-expression matrices are not supported."
+            )
         source_indices = torch.tensor(
             [source for source, _ in matched],
             dtype=torch.long,
@@ -235,14 +307,20 @@ class ALMA3:
         target_indices = torch.tensor([target for _, target in matched], dtype=torch.long)
 
         results: list[dict[str, Any]] = []
+        observed_total = 0
+        clipped_total = 0
         for start in range(0, len(ids), size):
             stop = min(start + size, len(ids))
-            aligned, observed = _align_array_batch(
+            aligned, observed, summary = _align_array_batch(
                 values[start:stop],
                 source_indices,
                 target_indices,
                 len(self.cpg.cpg_ids),
+                input_values=input_values,
+                sample_ids=ids[start:stop],
             )
+            observed_total += summary.observed
+            clipped_total += summary.clipped
             batch_results, _, _ = self._predict_tensors(
                 ids[start:stop],
                 aligned,
@@ -250,4 +328,9 @@ class ALMA3:
                 torch.zeros_like(aligned),
             )
             results.extend(batch_results)
+        if clipped_total:
+            warnings.warn(
+                _adjustment_message(_ArrayValueSummary(observed_total, clipped_total)),
+                stacklevel=2,
+            )
         return results

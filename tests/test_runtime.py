@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import csv
+import gzip
+import hashlib
 import json
 import math
 import shutil
@@ -23,6 +26,10 @@ from alma3.dx import DX_TARGETS, DiagnosticModel
 from alma3.hashes import publish_new_file as publish_new_file_actual
 from alma3.infer import (
     InputContractError,
+    _array_csv_batches,
+    demo_main,
+    demo_path,
+    infer_input_format,
     load_bed_methyl_with_manifest,
     run_inference,
     validate_embedding_sidecar,
@@ -30,7 +37,7 @@ from alma3.infer import (
 from alma3.infer import main as infer_main
 from alma3.model import FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
-from alma3.runtime import _align_array_batch
+from alma3.runtime import _align_array_batch, _prepare_array_values
 from tests.helpers import (
     create_release,
     foundation_config,
@@ -165,12 +172,158 @@ class RuntimeContractTests(unittest.TestCase):
                     beta,
                     cpg_ids,
                     ["first", "second", "third"],
-                    batch_size=2,
                 )
             load.assert_called_once_with(release, device="cpu")
             self.assertEqual(embedded_batch_sizes, [2, 1])
             self.assertEqual([int(call.args[0].shape[0]) for call in align.call_args_list], [2, 1])
             self.assertEqual([result["sample_id"] for result in results], ["first", "second", "third"])
+
+    def test_corrected_beta_policy_accepts_only_bounded_beta_like_rows(self) -> None:
+        accepted = {
+            "lower limits": (torch.tensor([[*([0.5] * 90), *([-0.05] * 9), -0.5]]), 0.0),
+            "upper limits": (torch.tensor([[*([0.5] * 90), *([1.05] * 9), 1.5]]), 1.0),
+        }
+        for name, (values, bound) in accepted.items():
+            with self.subTest(name=name):
+                prepared, observed, summary = _prepare_array_values(
+                    values,
+                    [name],
+                    input_values="beta",
+                )
+                self.assertEqual(summary.observed, 100)
+                self.assertEqual(summary.clipped, 10)
+                self.assertTrue(bool(observed.all().item()))
+                self.assertEqual(prepared[0, 89].item(), 0.5)
+                self.assertEqual(prepared[0, 90:].tolist(), [bound] * 10)
+
+        ordinary = torch.tensor([[0.0, 0.25, 1.0, math.nan]])
+        prepared, observed, summary = _prepare_array_values(ordinary, ["ordinary"], input_values="beta")
+        self.assertTrue(torch.equal(prepared[observed], ordinary[observed]))
+        self.assertTrue(bool(torch.isnan(prepared[~observed]).all().item()))
+        self.assertEqual(summary, (3, 0))
+
+        rejected = {
+            "inside": torch.tensor([[*([0.5] * 89), *([-0.01] * 10), -0.1]]),
+            "near": torch.tensor([[*([0.5] * 90), *([-0.01] * 8), -0.1, -0.1]]),
+            "range": torch.tensor([[*([0.5] * 99), -0.5001]]),
+            "upper range": torch.tensor([[*([0.5] * 99), 1.5001]]),
+            "percentage": torch.full((1, 100), 50.0),
+            "implicit mvalue": torch.tensor([[-10.0, 0.0, 10.0]]),
+        }
+        for name, values in rejected.items():
+            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not beta-like"):
+                _prepare_array_values(values, [name], input_values="beta")
+
+    def test_explicit_mvalues_convert_stably_and_missing_stays_unobserved(self) -> None:
+        converted, observed, summary = _prepare_array_values(
+            torch.tensor([[-1000.0, 0.0, 1000.0, math.nan]]),
+            ["mvalues"],
+            input_values="mvalue",
+        )
+        self.assertEqual(converted[0, :3].tolist(), [0.0, 0.5, 1.0])
+        self.assertEqual(observed.tolist(), [[True, True, True, False]])
+        self.assertEqual(summary.observed, 3)
+        self.assertEqual(summary.clipped, 0)
+        with self.assertRaisesRegex(ValueError, "infinity"):
+            _prepare_array_values(torch.tensor([[math.inf]]), ["bad"], input_values="mvalue")
+        with self.assertRaisesRegex(ValueError, "infinity"):
+            _prepare_array_values(torch.tensor([[-math.inf]]), ["bad"], input_values="beta")
+
+    def test_array_csv_rejects_low_cpg_overlap_before_values(self) -> None:
+        manifest = CpGManifest(
+            cpg_ids=tuple(f"cg{index}" for index in range(1500)),
+            chr_id=torch.zeros(1500, dtype=torch.long),
+            pos=torch.linspace(0, 1, 1500),
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "expression.csv"
+            path.write_text("sample_id,ENSG1,ENSG2\nsample,5,10\n", encoding="utf-8")
+            with self.assertRaisesRegex(InputContractError, "Gene-expression matrices are not supported"):
+                list(_array_csv_batches(path, manifest, minimum_observed_cpgs=1500))
+
+            invalid = Path(raw) / "invalid.csv"
+            invalid.write_text(
+                "sample_id," + ",".join(manifest.cpg_ids) + "\nsample,word," + ",".join(["0.5"] * 1499) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(InputContractError, "non-numeric value"):
+                list(_array_csv_batches(invalid, manifest, minimum_observed_cpgs=1500))
+
+    def test_rejected_corrected_input_publishes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            input_path = root / "percent.csv"
+            cpg_ids = validated["cpg"].cpg_ids
+            input_path.write_text(
+                "sample_id," + ",".join(cpg_ids) + "\npercent," + ",".join(["50"] * len(cpg_ids)) + "\n",
+                encoding="utf-8",
+            )
+            output = root / "result.jsonl"
+            sidecar = root / "embedding.json"
+            with (
+                patch("alma3.runtime.load_release", return_value=validated),
+                self.assertRaisesRegex(ValueError, "not beta-like"),
+            ):
+                run_inference(
+                    release,
+                    input_path,
+                    "array-csv",
+                    output,
+                    device="cpu",
+                    embedding_sidecar=sidecar,
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(sidecar.exists())
+
+    def test_corrected_input_notice_and_progress_are_concise(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            input_path = root / "corrected.csv"
+            write_array_csv(input_path, sample_count=1)
+            input_path.write_text(
+                input_path.read_text(encoding="utf-8").replace(",0.5", ",-0.01", 1),
+                encoding="utf-8",
+            )
+            output = root / "result.jsonl"
+            stderr = StringIO()
+            with (
+                patch("alma3.runtime.load_release", return_value=validated),
+                redirect_stderr(stderr),
+            ):
+                run_inference(
+                    release,
+                    input_path,
+                    "array-csv",
+                    output,
+                    device="cpu",
+                    progress=True,
+                )
+            self.assertEqual(
+                stderr.getvalue().splitlines(),
+                [
+                    "Processed 1 samples.",
+                    "Adjusted corrected beta values: clipped 1/1,500 matched values to [0,1].",
+                    f"Results saved to {output}",
+                ],
+            )
+
+    def test_demo_is_the_exact_v2_dataset(self) -> None:
+        digest = hashlib.sha256()
+        with gzip.open(demo_path(), "rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        self.assertEqual(digest.hexdigest(), "172ddb11f799ccc7952c5f4a86e8babefba99a685e92ec014a46a531b49227a6")
+        with gzip.open(demo_path(), "rt", encoding="utf-8", newline="") as handle:
+            reader = csv.reader(handle)
+            header = next(reader)
+            rows = list(reader)
+        self.assertEqual(len(header) - 1, 331556)
+        self.assertEqual(len(rows), 10)
+        self.assertTrue(all(len(row) == len(header) for row in rows))
 
     def test_embedding_api_and_forward_are_exactly_equivalent(self) -> None:
         config = foundation_config()
@@ -509,6 +662,8 @@ class RuntimeContractTests(unittest.TestCase):
                 device="auto",
                 embedding_sidecar=None,
                 batch_size=2,
+                input_values="beta",
+                progress=False,
             )
         automatic = [item for item in arguments if item not in {"--artifact", "release"}]
         with patch("alma3.infer.run_inference") as run:
@@ -521,10 +676,52 @@ class RuntimeContractTests(unittest.TestCase):
                 device="cuda:1",
                 embedding_sidecar=None,
                 batch_size=8,
+                input_values="beta",
+                progress=False,
             )
+        inferred = ["-i", "input.csv.gz", "-o", "result.jsonl", "--input-values", "mvalue"]
+        with patch("alma3.infer.run_inference") as run:
+            self.assertEqual(infer_main(inferred), 0)
+            run.assert_called_once_with(
+                None,
+                ["input.csv.gz"],
+                "array-csv",
+                "result.jsonl",
+                device="auto",
+                embedding_sidecar=None,
+                batch_size=2,
+                input_values="mvalue",
+                progress=False,
+            )
+        self.assertEqual(infer_input_format(["first.bed", "second.bed.gz"]), "bedmethyl")
+        self.assertEqual(infer_input_format("cohort.csv.gz"), "array-csv")
+        with self.assertRaisesRegex(InputContractError, "mixed formats"):
+            infer_input_format(["sample.bed", "cohort.csv"])
+        with self.assertRaisesRegex(InputContractError, "cannot infer"):
+            infer_input_format("input.tsv")
+        terminal = StringIO()
+        terminal.isatty = lambda: True
+        with patch("alma3.infer.run_inference") as run, redirect_stderr(terminal):
+            self.assertEqual(infer_main(["-i", "input.csv", "-o", "result.jsonl"]), 0)
+            self.assertTrue(run.call_args.kwargs["progress"])
+        self.assertEqual(terminal.getvalue(), "Loading ALMA3...\n")
         for removed in ("--research", "--download", "--all-probs", "--output-format"):
             with self.subTest(removed=removed), self.assertRaises(SystemExit):
                 infer_main([*arguments, removed])
+
+    def test_demo_cli_uses_packaged_input_and_new_only_default_output(self) -> None:
+        with patch("alma3.infer.run_inference") as run:
+            self.assertEqual(demo_main([]), 0)
+            run.assert_called_once_with(
+                None,
+                demo_path(),
+                "array-csv",
+                "alma3-demo.jsonl",
+                device="auto",
+                batch_size=2,
+                input_values="beta",
+                progress=False,
+            )
 
 
 if __name__ == "__main__":

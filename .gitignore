@@ -18,6 +18,8 @@ data/
 *.hdf5
 *.csv
 *.csv.gz
+!src/alma3/examples/
+!src/alma3/examples/example_dataset.csv.gz
 *.bed
 *.bed.gz
 !tests/fixtures/*.csv

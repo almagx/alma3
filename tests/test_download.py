@@ -6,8 +6,8 @@ import os
 import shutil
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest.mock import patch
 

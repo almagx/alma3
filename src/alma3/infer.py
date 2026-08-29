@@ -6,6 +6,7 @@ import gzip
 import json
 import math
 import os
+import sys
 import tempfile
 from collections.abc import Iterator, Sequence
 from pathlib import Path
@@ -23,7 +24,13 @@ from .dx import (
 )
 from .hashes import publish_new_file, validate_new_external_outputs
 from .release import revalidate_release_identity
-from .runtime import ALMA3
+from .runtime import (
+    ALMA3,
+    DEFAULT_BATCH_SIZE,
+    _adjustment_message,
+    _ArrayValueSummary,
+    _prepare_array_values,
+)
 from .sitewise import real_coverage_presentation
 
 
@@ -31,7 +38,7 @@ class InputContractError(ValueError):
     """Raised when an inference input does not match the ALMA3 contract."""
 
 
-DEFAULT_INFERENCE_BATCH_SIZE = 2
+DEFAULT_INFERENCE_BATCH_SIZE = DEFAULT_BATCH_SIZE
 EMBEDDING_SIDECAR_KIND = "alma3_embedding_sidecar"
 EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
 
@@ -145,7 +152,9 @@ def _array_csv_batches(
     cpg: CpGManifest,
     *,
     batch_size: int = DEFAULT_INFERENCE_BATCH_SIZE,
-) -> Iterator[tuple[list[str], torch.Tensor, torch.Tensor]]:
+    input_values: str = "beta",
+    minimum_observed_cpgs: int = 1,
+) -> Iterator[tuple[list[str], torch.Tensor, torch.Tensor, _ArrayValueSummary]]:
     if type(batch_size) is not int or batch_size <= 0:
         raise InputContractError("batch_size must be a positive integer")
     input_path = Path(path)
@@ -172,10 +181,25 @@ def _array_csv_batches(
             raise InputContractError(f"array CSV has duplicate CpG columns: {duplicates[:5]}")
         column_index = {name: idx for idx, name in enumerate(columns)}
         cpg_columns = [column_index.get(cpg_id) for cpg_id in cpg.cpg_ids]
+        recognized = sum(column is not None for column in cpg_columns)
+        if recognized < minimum_observed_cpgs:
+            raise InputContractError(
+                f"found {recognized:,} ALMA3 CpGs; at least {minimum_observed_cpgs:,} are required. "
+                "Gene-expression matrices are not supported."
+            )
         sample_ids: list[str] = []
         seen_sample_ids: set[str] = set()
         values: list[list[float]] = []
-        observed_rows: list[list[bool]] = []
+
+        def prepared_batch() -> tuple[list[str], torch.Tensor, torch.Tensor, _ArrayValueSummary]:
+            raw_values = torch.tensor(values, dtype=torch.float32)
+            prepared, observed, summary = _prepare_array_values(
+                raw_values,
+                sample_ids,
+                input_values=input_values,
+            )
+            return sample_ids, torch.where(observed, prepared, 0.0), observed, summary
+
         for line_no, row in enumerate(reader, start=2):
             if len(row) != len(header):
                 raise InputContractError(f"array CSV row {line_no} has {len(row)} fields; expected {len(header)}")
@@ -186,40 +210,34 @@ def _array_csv_batches(
                 raise InputContractError(f"array CSV has duplicate sample id: {sample_id}")
             seen_sample_ids.add(sample_id)
             sample_values: list[float] = []
-            sample_observed: list[bool] = []
-            for column in cpg_columns:
+            for cpg_id, column in zip(cpg.cpg_ids, cpg_columns, strict=True):
                 if column is None:
-                    sample_values.append(0.0)
-                    sample_observed.append(False)
+                    sample_values.append(math.nan)
                     continue
                 raw = row[1 + column].strip()
                 if raw == "" or raw.lower() == "nan":
-                    sample_values.append(0.0)
-                    sample_observed.append(False)
+                    sample_values.append(math.nan)
                     continue
-                value = float(raw)
-                if not math.isfinite(value) or value < 0 or value > 1:
-                    raise InputContractError("array CSV observed beta values must be finite and in [0, 1]")
+                try:
+                    value = float(raw)
+                except ValueError:
+                    raise InputContractError(
+                        f"array CSV row {line_no} has non-numeric value for CpG {cpg_id}: {raw!r}"
+                    ) from None
+                if not math.isfinite(value):
+                    raise InputContractError(
+                        f"array CSV row {line_no} has nonfinite value for CpG {cpg_id}: {raw!r}"
+                    )
                 sample_values.append(value)
-                sample_observed.append(True)
-            if not any(sample_observed):
+            if not any(math.isfinite(value) for value in sample_values):
                 raise InputContractError(f"array CSV row {line_no} has no observed CpGs")
             sample_ids.append(sample_id)
             values.append(sample_values)
-            observed_rows.append(sample_observed)
             if len(values) == batch_size:
-                yield (
-                    sample_ids,
-                    torch.tensor(values, dtype=torch.float32),
-                    torch.tensor(observed_rows, dtype=torch.bool),
-                )
-                sample_ids, values, observed_rows = [], [], []
+                yield prepared_batch()
+                sample_ids, values = [], []
         if values:
-            yield (
-                sample_ids,
-                torch.tensor(values, dtype=torch.float32),
-                torch.tensor(observed_rows, dtype=torch.bool),
-            )
+            yield prepared_batch()
         try:
             path_stat = input_path.stat()
         except FileNotFoundError:
@@ -232,12 +250,17 @@ def _array_csv_batches(
             raise InputContractError("array CSV contains no samples")
 
 
-def load_array_csv(path: str | Path, cpg: CpGManifest) -> tuple[list[str], torch.Tensor, torch.Tensor]:
-    batches = list(_array_csv_batches(path, cpg))
+def load_array_csv(
+    path: str | Path,
+    cpg: CpGManifest,
+    *,
+    input_values: str = "beta",
+) -> tuple[list[str], torch.Tensor, torch.Tensor]:
+    batches = list(_array_csv_batches(path, cpg, input_values=input_values))
     return (
-        [sample_id for sample_ids, _, _ in batches for sample_id in sample_ids],
-        torch.cat([values for _, values, _ in batches]),
-        torch.cat([observed for _, _, observed in batches]),
+        [sample_id for sample_ids, _, _, _ in batches for sample_id in sample_ids],
+        torch.cat([values for _, values, _, _ in batches]),
+        torch.cat([observed for _, _, observed, _ in batches]),
     )
 
 
@@ -309,6 +332,27 @@ def _input_paths(value: str | Path | Sequence[str | Path]) -> list[Path]:
     return paths
 
 
+def infer_input_format(value: str | Path | Sequence[str | Path]) -> str:
+    paths = [Path(value)] if isinstance(value, (str, Path)) else [Path(item) for item in value]
+    formats: set[str] = set()
+    invalid: list[str] = []
+    for path in paths:
+        name = path.name.lower()
+        if name.endswith((".bed", ".bed.gz")):
+            formats.add("bedmethyl")
+        elif name.endswith((".csv", ".csv.gz")):
+            formats.add("array-csv")
+        else:
+            invalid.append(str(path))
+    if invalid:
+        raise InputContractError(
+            f"cannot infer input format from filename: {invalid[:5]}; use --format array-csv or bedmethyl"
+        )
+    if len(formats) != 1:
+        raise InputContractError("inference inputs use mixed formats; provide one format per command")
+    return formats.pop()
+
+
 def _bedmethyl_batches(
     paths: Sequence[Path],
     cpg: CpGManifest,
@@ -357,6 +401,8 @@ def run_inference(
     device: str = "auto",
     embedding_sidecar: str | Path | None = None,
     batch_size: int = DEFAULT_INFERENCE_BATCH_SIZE,
+    input_values: str = "beta",
+    progress: bool = False,
 ) -> Path:
     if type(batch_size) is not int or batch_size <= 0:
         raise InputContractError("batch_size must be a positive integer")
@@ -365,6 +411,10 @@ def run_inference(
         raise InputContractError("array-csv accepts exactly one input file")
     if input_format not in {"array-csv", "bedmethyl"}:
         raise InputContractError("input_format must be array-csv or bedmethyl")
+    if input_values not in {"beta", "mvalue"}:
+        raise InputContractError("input_values must be beta or mvalue")
+    if input_format != "array-csv" and input_values != "beta":
+        raise InputContractError("--input-values applies only to array-csv input")
     validate_new_external_outputs(
         None,
         {"inference output": output, "embedding sidecar": embedding_sidecar},
@@ -382,24 +432,34 @@ def run_inference(
     hashes = validated["hashes"]
     if input_format == "array-csv":
         batches = (
-            (sample_ids, x, observed, torch.zeros_like(x))
-            for sample_ids, x, observed in _array_csv_batches(
+            (sample_ids, x, observed, torch.zeros_like(x), summary)
+            for sample_ids, x, observed, summary in _array_csv_batches(
                 inputs[0],
                 runtime.cpg,
                 batch_size=batch_size,
+                input_values=input_values,
+                minimum_observed_cpgs=runtime.minimum_observed_cpgs,
             )
         )
     else:
-        batches = _bedmethyl_batches(inputs, runtime.cpg, batch_size=batch_size)
+        batches = (
+            (*batch, _ArrayValueSummary(0, 0))
+            for batch in _bedmethyl_batches(inputs, runtime.cpg, batch_size=batch_size)
+        )
     minimum_observed = runtime.minimum_observed_cpgs
     out.parent.mkdir(parents=True, exist_ok=True)
     sidecar_samples: list[dict[str, Any]] = []
+    adjustment_observed = 0
+    adjustment_clipped = 0
+    processed = 0
 
     descriptor, raw_temporary = tempfile.mkstemp(prefix=f".{out.name}.", suffix=".tmp", dir=out.parent)
     temporary = Path(raw_temporary)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
-            for sample_ids, x, observed, uncertainty in batches:
+            for sample_ids, x, observed, uncertainty, adjustment in batches:
+                adjustment_observed += adjustment.observed
+                adjustment_clipped += adjustment.clipped
                 clinical_results, embedding, observed_counts = runtime._predict_tensors(
                     sample_ids,
                     x,
@@ -423,6 +483,9 @@ def run_inference(
                     )
                 for result in clinical_results:
                     handle.write(serialize_result(result) + "\n")
+                processed += len(sample_ids)
+                if progress:
+                    print(f"Processed {processed:,} samples.", file=sys.stderr)
             handle.flush()
             os.fsync(handle.fileno())
         sidecar_temporary = None
@@ -463,6 +526,13 @@ def run_inference(
                 sidecar_temporary.unlink(missing_ok=True)
     finally:
         temporary.unlink(missing_ok=True)
+    if adjustment_clipped:
+        print(
+            _adjustment_message(_ArrayValueSummary(adjustment_observed, adjustment_clipped)),
+            file=sys.stderr,
+        )
+    if progress:
+        print(f"Results saved to {out}", file=sys.stderr)
     return out
 
 
@@ -477,6 +547,7 @@ def main(argv: list[str] | None = None) -> int:
         help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
     )
     parser.add_argument(
+        "-i",
         "--input",
         required=True,
         action="append",
@@ -484,11 +555,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--format",
-        required=True,
         choices=["array-csv", "bedmethyl"],
-        help="input data format",
+        help="input data format; inferred from .bed(.gz) or .csv(.gz) when omitted",
     )
-    parser.add_argument("--output", required=True, help="new canonical ALMA3 JSONL output file")
+    parser.add_argument("-o", "--output", required=True, help="new canonical ALMA3 JSONL output file")
+    parser.add_argument(
+        "--input-values",
+        default="beta",
+        choices=["beta", "mvalue"],
+        help="array values supplied as beta values or explicit M-values",
+    )
     parser.add_argument(
         "--embedding-sidecar",
         help="optional new JSON file containing same-pass diagnostic embeddings",
@@ -501,14 +577,53 @@ def main(argv: list[str] | None = None) -> int:
         help="samples evaluated together",
     )
     args = parser.parse_args(argv)
+    input_format = args.format or infer_input_format(args.input)
+    progress = sys.stderr.isatty()
+    if progress:
+        print("Loading ALMA3...", file=sys.stderr)
     run_inference(
         args.artifact,
         args.input,
-        args.format,
+        input_format,
         args.output,
         device=args.device,
         embedding_sidecar=args.embedding_sidecar,
         batch_size=args.batch_size,
+        input_values=args.input_values,
+        progress=progress,
+    )
+    return 0
+
+
+def demo_path() -> Path:
+    return Path(__file__).with_name("examples") / "example_dataset.csv.gz"
+
+
+def demo_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="alma3 demo",
+        description="Run the packaged ALMA3 example.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--artifact",
+        help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
+    )
+    parser.add_argument("-o", "--output", default="alma3-demo.jsonl", help="new demo JSONL output file")
+    parser.add_argument("--device", default="auto", help="inference device: auto, cpu, cuda, or cuda:<index>")
+    args = parser.parse_args(argv)
+    progress = sys.stderr.isatty()
+    if progress:
+        print("Loading ALMA3...", file=sys.stderr)
+    run_inference(
+        args.artifact,
+        demo_path(),
+        "array-csv",
+        args.output,
+        device=args.device,
+        batch_size=DEFAULT_INFERENCE_BATCH_SIZE,
+        input_values="beta",
+        progress=progress,
     )
     return 0
 
