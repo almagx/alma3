@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
@@ -39,7 +40,7 @@ from alma3.infer import (
 from alma3.infer import main as infer_main
 from alma3.model import FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
-from alma3.runtime import _align_array_batch, _prepare_array_values
+from alma3.runtime import _align_array_batch, _prepare_array_values, _warn_if_slow_cpu_build
 from tests.helpers import (
     create_release,
     foundation_config,
@@ -68,6 +69,23 @@ def _assert_json_close(test: unittest.TestCase, left, right, *, atol: float = 1e
 
 
 class RuntimeContractTests(unittest.TestCase):
+    def test_slow_x86_cpu_torch_build_warns_at_model_load(self) -> None:
+        with (
+            patch("alma3.runtime.platform.machine", return_value="x86_64"),
+            patch("alma3.runtime.torch.__config__.show", return_value="USE_MKL=OFF"),
+            self.assertWarnsRegex(RuntimeWarning, "lacks MKL"),
+        ):
+            _warn_if_slow_cpu_build(torch.device("cpu"))
+
+        with (
+            patch("alma3.runtime.platform.machine", return_value="x86_64"),
+            patch("alma3.runtime.torch.__config__.show", return_value="USE_MKL=ON"),
+            warnings.catch_warnings(record=True) as caught,
+        ):
+            warnings.simplefilter("always")
+            _warn_if_slow_cpu_build(torch.device("cpu"))
+        self.assertEqual(caught, [])
+
     def test_bedmethyl_coordinate_index_is_cached_and_preserves_duplicate_probes(self) -> None:
         manifest = CpGManifest(
             cpg_ids=("first", "second"),

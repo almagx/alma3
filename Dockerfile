@@ -9,10 +9,14 @@ RUN python -m pip install --no-cache-dir -r requirements.txt \
     && python -m pip check
 
 RUN python - <<'PY'
+import platform
+
 import torch
 
 if torch.version.cuda is not None:
     raise SystemExit(f"runtime torch must be CPU-only, found CUDA {torch.version.cuda}")
+if platform.machine().lower() in {"amd64", "x86_64"} and "USE_MKL=ON" not in torch.__config__.show():
+    raise SystemExit("runtime torch must use MKL on x86-64")
 PY
 
 COPY src ./src

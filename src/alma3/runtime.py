@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import platform
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -13,6 +14,20 @@ from .download import load_release
 from .sitewise import real_coverage_presentation
 
 DEFAULT_BATCH_SIZE = 2
+
+
+def _warn_if_slow_cpu_build(device: torch.device) -> None:
+    if (
+        device.type == "cpu"
+        and platform.machine().lower() in {"amd64", "x86_64"}
+        and "USE_MKL=OFF" in torch.__config__.show()
+    ):
+        warnings.warn(
+            "This PyTorch build lacks MKL; ALMA3 CPU inference may be much slower. "
+            "Install the official PyTorch CPU wheel.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
 
 
 class _ArrayValueSummary(NamedTuple):
@@ -130,6 +145,7 @@ class ALMA3:
         """Load a release from an explicit path, configured path, cache, or verified download."""
 
         self.device = resolve_device(device)
+        _warn_if_slow_cpu_build(self.device)
         validated = load_release(artifact, device=str(self.device))
         self.artifact = validated["root"]
         self._validated = validated

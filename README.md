@@ -88,6 +88,8 @@ pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
 pip install alma3
 ```
 
+On the same 30-vCPU x86-64 host, the ten-sample demo took 46.99 seconds with the official MKL-enabled CPU wheel but more than 20 minutes with a non-MKL system build. ALMA3 warns when it detects the slow build. Keep the default batch size of 2 unless you benchmark another value.
+
 ## Results
 
 ALMA3 writes one ordered result per sample. A `.jsonl` output preserves the complete resolved hierarchy and exact release hashes. A `.csv` output provides a clinician-readable summary, resolved labels, unresolved differential, CpG support, and model version.
