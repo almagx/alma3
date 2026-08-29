@@ -19,6 +19,12 @@ Run your own sample:
 alma3 infer -i sample.bed -o sample.alma3.jsonl
 ```
 
+Use a `.csv` output name when a flat cohort table is more convenient:
+
+```bash
+alma3 infer -i cohort.csv -o results.csv
+```
+
 The first run downloads the fixed model, verifies every file, and caches it. Allow about 5 GB of disk space.
 
 ## Inputs
@@ -84,7 +90,7 @@ pip install alma3
 
 ## Results
 
-ALMA3 writes one ordered JSON record per sample:
+ALMA3 writes one ordered result per sample. A `.jsonl` output preserves the complete result; a `.csv` output provides the accepted hierarchy, scores, thresholds, and unresolved level as a flat table.
 
 - `classified`: a diagnostic label was accepted.
 - `tumor_not_detected`: tumor absence was accepted.

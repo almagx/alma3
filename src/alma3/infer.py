@@ -14,7 +14,7 @@ from typing import Any
 
 import torch
 
-from .clinical_result import serialize_result
+from .clinical_result import RESULT_LEVELS, serialize_result, validate_result
 from .data import CpGManifest
 from .dx import (
     DX_REPRESENTATION_DIMENSIONS,
@@ -41,6 +41,15 @@ class InputContractError(ValueError):
 DEFAULT_INFERENCE_BATCH_SIZE = DEFAULT_BATCH_SIZE
 EMBEDDING_SIDECAR_KIND = "alma3_embedding_sidecar"
 EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
+_RESULT_CSV_FIELDS = (
+    "sample_id",
+    "status",
+    "accepted_level",
+    "accepted_label",
+    *(field for level in RESULT_LEVELS for field in (f"{level}_label", f"{level}_score", f"{level}_threshold")),
+    "unresolved_level",
+    "unresolved_threshold",
+)
 
 
 def embedding_sidecar_schema_path() -> Path:
@@ -141,6 +150,29 @@ def _unlink_owned(path: Path, identity: tuple[int, int]) -> None:
         return
     if (current.st_dev, current.st_ino) == identity:
         path.unlink()
+
+
+def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
+    validate_result(result)
+    accepted = result["accepted"] or {}
+    decision = result["decision"] or {}
+    nodes = {node["level"]: node for node in result["path"]}
+    row: dict[str, Any] = {
+        "sample_id": result["sample_id"],
+        "status": result["status"],
+        "accepted_level": accepted.get("level", ""),
+        "accepted_label": accepted.get("label", ""),
+        "unresolved_level": decision.get("level", ""),
+        "unresolved_threshold": decision.get("threshold", ""),
+    }
+    for level in RESULT_LEVELS:
+        node = nodes.get(level, {})
+        score = node.get("score")
+        threshold = node.get("threshold")
+        row[f"{level}_label"] = node.get("label", "")
+        row[f"{level}_score"] = "" if score is None else score
+        row[f"{level}_threshold"] = "" if threshold is None else threshold
+    return row
 
 
 def _stat_identity(value: os.stat_result) -> tuple[int, int, int, int]:
@@ -406,6 +438,9 @@ def run_inference(
 ) -> Path:
     if type(batch_size) is not int or batch_size <= 0:
         raise InputContractError("batch_size must be a positive integer")
+    output_suffix = Path(output).suffix.lower()
+    if output_suffix not in {".csv", ".jsonl"}:
+        raise InputContractError("output filename must end in .jsonl or .csv")
     inputs = _input_paths(input_path)
     if input_format == "array-csv" and len(inputs) != 1:
         raise InputContractError("array-csv accepts exactly one input file")
@@ -457,6 +492,10 @@ def run_inference(
     temporary = Path(raw_temporary)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
+            csv_writer = None
+            if output_suffix == ".csv":
+                csv_writer = csv.DictWriter(handle, fieldnames=_RESULT_CSV_FIELDS, lineterminator="\n")
+                csv_writer.writeheader()
             for sample_ids, x, observed, uncertainty, adjustment in batches:
                 adjustment_observed += adjustment.observed
                 adjustment_clipped += adjustment.clipped
@@ -482,7 +521,10 @@ def run_inference(
                         )
                     )
                 for result in clinical_results:
-                    handle.write(serialize_result(result) + "\n")
+                    if csv_writer is None:
+                        handle.write(serialize_result(result) + "\n")
+                    else:
+                        csv_writer.writerow(_result_csv_row(result))
                 processed += len(sample_ids)
                 if progress:
                     print(f"Processed {processed:,} samples.", file=sys.stderr)
@@ -558,7 +600,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=["array-csv", "bedmethyl"],
         help="input data format; inferred from .bed(.gz) or .csv(.gz) when omitted",
     )
-    parser.add_argument("-o", "--output", required=True, help="new canonical ALMA3 JSONL output file")
+    parser.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help="new ALMA3 output ending in .jsonl or .csv",
+    )
     parser.add_argument(
         "--input-values",
         default="beta",

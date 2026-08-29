@@ -25,8 +25,10 @@ from alma3.data import CpGManifest
 from alma3.dx import DX_TARGETS, DiagnosticModel
 from alma3.hashes import publish_new_file as publish_new_file_actual
 from alma3.infer import (
+    _RESULT_CSV_FIELDS,
     InputContractError,
     _array_csv_batches,
+    _result_csv_row,
     demo_main,
     demo_path,
     infer_input_format,
@@ -145,6 +147,9 @@ class RuntimeContractTests(unittest.TestCase):
                 self.assertRaisesRegex(FileExistsError, "already exists"),
             ):
                 run_inference(None, input_path, "array-csv", output)
+            runtime.assert_not_called()
+            with self.assertRaisesRegex(InputContractError, "must end in .jsonl or .csv"):
+                run_inference(None, input_path, "array-csv", root / "result.txt")
             runtime.assert_not_called()
 
     def test_python_api_loads_once_batches_and_preserves_order(self) -> None:
@@ -492,6 +497,57 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertEqual(payload["release"]["model_sha256"], results[0]["release"]["model_sha256"])
             self.assertEqual(payload["release"]["taxonomy_sha256"], results[0]["release"]["taxonomy_sha256"])
             self.assertEqual(payload["release"]["thresholds_sha256"], results[0]["release"]["thresholds_sha256"])
+
+    def test_csv_output_is_a_flat_view_of_the_same_ordered_results(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            input_path = root / "input.csv"
+            write_array_csv(input_path, sample_count=3)
+            output = root / "result.csv"
+
+            with (
+                patch("alma3.runtime.load_release", return_value=validated),
+                patch("alma3.infer._result_csv_row", wraps=_result_csv_row) as flatten,
+            ):
+                run_inference(release, input_path, "array-csv", output, device="cpu")
+
+            with output.open(encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle)
+                rows = list(reader)
+            self.assertEqual(tuple(reader.fieldnames or ()), _RESULT_CSV_FIELDS)
+            expected = [
+                {field: "" if value == "" else str(value) for field, value in _result_csv_row(call.args[0]).items()}
+                for call in flatten.call_args_list
+            ]
+            self.assertEqual(rows, expected)
+            self.assertEqual([row["sample_id"] for row in rows], ["sample-1", "sample-2", "sample-3"])
+
+    def test_csv_serialization_failure_publishes_neither_result_nor_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            input_path = root / "input.csv"
+            write_array_csv(input_path, sample_count=1)
+            output = root / "result.csv"
+            sidecar = root / "embedding.json"
+            with (
+                patch("alma3.runtime.load_release", return_value=validated),
+                patch("alma3.infer._result_csv_row", side_effect=OSError("CSV serialization failed")),
+                self.assertRaisesRegex(OSError, "CSV serialization failed"),
+            ):
+                run_inference(
+                    release,
+                    input_path,
+                    "array-csv",
+                    output,
+                    device="cpu",
+                    embedding_sidecar=sidecar,
+                )
+            self.assertFalse(output.exists())
+            self.assertFalse(sidecar.exists())
 
     def test_sparse_and_interrupted_inference_publish_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
