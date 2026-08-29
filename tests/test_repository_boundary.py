@@ -17,6 +17,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
             modules,
             {
                 "__init__.py",
+                "__main__.py",
                 "cli.py",
                 "clinical_result.py",
                 "config.py",

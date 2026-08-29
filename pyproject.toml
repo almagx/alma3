@@ -17,6 +17,11 @@ dependencies = [
   "filelock==3.29.0"
 ]
 
+[project.urls]
+Homepage = "https://github.com/almagx/alma3"
+Source = "https://github.com/almagx/alma3"
+Issues = "https://github.com/almagx/alma3/issues"
+
 [project.optional-dependencies]
 dev = [
   "ruff==0.16.5"
@@ -29,7 +34,7 @@ alma3 = "alma3.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-alma3 = ["schemas/*.json", "release_catalog.json"]
+alma3 = ["schemas/*.json", "release_catalog.json", "py.typed"]
 
 [tool.ruff]
 line-length = 120

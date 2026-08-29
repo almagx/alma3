@@ -3,14 +3,19 @@ from __future__ import annotations
 import json
 import math
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 import torch
 
 from alma3 import ALMA3
+from alma3.cli import main as cli_main
 from alma3.clinical_result import validate_result
 from alma3.config import DxConfig
 from alma3.dx import DX_TARGETS, DiagnosticModel
@@ -52,6 +57,23 @@ def _assert_json_close(test: unittest.TestCase, left, right, *, atol: float = 1e
 
 
 class RuntimeContractTests(unittest.TestCase):
+    def test_package_module_entrypoint_and_concise_cli_errors(self) -> None:
+        completed = subprocess.run(
+            [sys.executable, "-m", "alma3", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.stdout.strip(), "alma3 3.0.0")
+
+        error_output = StringIO()
+        with (
+            patch("alma3.infer.main", side_effect=InputContractError("invalid test input")),
+            redirect_stderr(error_output),
+        ):
+            self.assertEqual(cli_main(["infer"]), 2)
+        self.assertEqual(error_output.getvalue(), "alma3: error: invalid test input\n")
+
     def test_multiple_bedmethyl_inputs_share_one_batch_and_preserve_order(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -273,7 +295,7 @@ class RuntimeContractTests(unittest.TestCase):
                     device="cpu",
                     embedding_sidecar=sidecar,
                 )
-            self.assertEqual(batch_sizes, [2, 1])
+            self.assertEqual(batch_sizes, [1, 1, 1])
             self.assertEqual(len(embedded), len(consumed))
             self.assertTrue(all(source is target for source, target in zip(embedded, consumed, strict=True)))
 
@@ -464,7 +486,7 @@ class RuntimeContractTests(unittest.TestCase):
                 "result.jsonl",
                 device="auto",
                 embedding_sidecar=None,
-                batch_size=2,
+                batch_size=1,
             )
         automatic = [item for item in arguments if item not in {"--artifact", "release"}]
         with patch("alma3.infer.run_inference") as run:

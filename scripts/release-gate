@@ -27,6 +27,9 @@ def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
 
 def inspect_wheel(wheel: Path) -> None:
     with zipfile.ZipFile(wheel) as archive:
+        names = {info.filename for info in archive.infolist()}
+        if "alma3/py.typed" not in names:
+            raise RuntimeError("wheel is missing the PEP 561 marker")
         for info in archive.infolist():
             name = info.filename.lower()
             if Path(name).suffix in FORBIDDEN_NAMES:
@@ -104,7 +107,7 @@ def main() -> int:
                         "-c",
                         "python -m pip uninstall -y alma3 >/dev/null && "
                         "python -m pip install --no-deps /wheel/alma3-3.0.0-*.whl >/dev/null && "
-                        "alma3 --version",
+                        "alma3 --version && python -m alma3 --version",
                     ]
                 )
 

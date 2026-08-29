@@ -271,9 +271,12 @@ def validate_release(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="alma3 verify-release",
-        description="Verify a complete, checksum-bound ALMA3 release artifact.",
+        description="Verify an ALMA3 release and print its machine-readable identity.",
     )
-    parser.add_argument("--artifact")
+    parser.add_argument(
+        "--artifact",
+        help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
+    )
     args = parser.parse_args(argv)
     from .download import load_release
 

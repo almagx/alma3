@@ -28,10 +28,10 @@ from .sitewise import real_coverage_presentation
 
 
 class InputContractError(ValueError):
-    """Raised when an inference input does not match the ALMA 3 contract."""
+    """Raised when an inference input does not match the ALMA3 contract."""
 
 
-DEFAULT_INFERENCE_BATCH_SIZE = 2
+DEFAULT_INFERENCE_BATCH_SIZE = 1
 EMBEDDING_SIDECAR_KIND = "alma3_embedding_sidecar"
 EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
 
@@ -469,14 +469,39 @@ def run_inference(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="alma3 infer", description="Run ALMA 3-Dx inference.")
-    parser.add_argument("--artifact")
-    parser.add_argument("--input", required=True, action="append")
-    parser.add_argument("--format", required=True, choices=["array-csv", "bedmethyl"])
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--embedding-sidecar")
-    parser.add_argument("--device", default="auto")
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_INFERENCE_BATCH_SIZE)
+    parser = argparse.ArgumentParser(
+        prog="alma3 infer",
+        description="Run ALMA3-Dx inference.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--artifact",
+        help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
+    )
+    parser.add_argument(
+        "--input",
+        required=True,
+        action="append",
+        help="input file; repeat for multiple BedMethyl samples",
+    )
+    parser.add_argument(
+        "--format",
+        required=True,
+        choices=["array-csv", "bedmethyl"],
+        help="input data format",
+    )
+    parser.add_argument("--output", required=True, help="new canonical ALMA3 JSONL output file")
+    parser.add_argument(
+        "--embedding-sidecar",
+        help="optional new JSON file containing same-pass diagnostic embeddings",
+    )
+    parser.add_argument("--device", default="auto", help="inference device: auto, cpu, cuda, or cuda:<index>")
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_INFERENCE_BATCH_SIZE,
+        help="samples evaluated together",
+    )
     args = parser.parse_args(argv)
     run_inference(
         args.artifact,

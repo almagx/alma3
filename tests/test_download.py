@@ -6,11 +6,12 @@ import os
 import shutil
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
-from alma3.download import DownloadError, _download_file, download_release, load_release
+from alma3.download import DownloadError, _copy_response, _download_file, download_release, load_release
 from alma3.hashes import sha256_file
 from tests.helpers import create_release
 
@@ -36,6 +37,26 @@ def _catalog(release: Path) -> dict[str, object]:
 
 
 class DownloadTests(unittest.TestCase):
+    def test_large_download_reports_progress_only_for_a_terminal(self) -> None:
+        target = io.BytesIO()
+        terminal = io.StringIO()
+        terminal.isatty = lambda: True
+        with (
+            patch("alma3.download.DOWNLOAD_PROGRESS_MIN_BYTES", 0),
+            patch("alma3.download.sys.stderr", terminal),
+            redirect_stderr(terminal),
+        ):
+            _copy_response(
+                io.BytesIO(b"payload"),
+                target,
+                name="model.safetensors",
+                initial_size=0,
+                expected_size=7,
+            )
+        self.assertEqual(target.getvalue(), b"payload")
+        self.assertIn("Downloading model.safetensors", terminal.getvalue())
+        self.assertIn("(100%)", terminal.getvalue())
+
     def test_resumable_file_download_and_hash_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

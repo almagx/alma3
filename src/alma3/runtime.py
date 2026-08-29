@@ -40,6 +40,8 @@ class ALMA3:
     """Load one ALMA3-Dx release and reuse it for one or many samples."""
 
     def __init__(self, artifact: str | Path | None = None, *, device: str = "auto") -> None:
+        """Load a release from an explicit path, configured path, cache, or verified download."""
+
         self.device = resolve_device(device)
         validated = load_release(artifact, device=str(self.device))
         self.artifact = validated["root"]
@@ -119,8 +121,10 @@ class ALMA3:
         self,
         inputs: str | Path | Sequence[str | Path],
         *,
-        batch_size: int = 2,
+        batch_size: int = 1,
     ) -> list[dict[str, Any]]:
+        """Predict one sample per BedMethyl file while preserving the supplied file order."""
+
         from .infer import load_bed_methyl_with_manifest
 
         size = _require_batch_size(batch_size)
@@ -171,8 +175,10 @@ class ALMA3:
         cpg_ids: Sequence[str],
         sample_ids: Sequence[str] | None = None,
         *,
-        batch_size: int = 2,
+        batch_size: int = 1,
     ) -> list[dict[str, Any]]:
+        """Predict rows of beta values aligned by CpG ID; NaN values are unobserved."""
+
         size = _require_batch_size(batch_size)
         columns = [str(value) for value in cpg_ids]
         if not columns or any(not value for value in columns) or len(columns) != len(set(columns)):

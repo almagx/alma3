@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 import urllib.error
 import urllib.request
 from importlib.resources import files
@@ -20,6 +21,7 @@ CATALOG_SCHEMA_VERSION = 1
 DEFAULT_CACHE_ENV = "ALMA3_CACHE_DIR"
 RELEASE_ENV = "ALMA3_RELEASE"
 DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+DOWNLOAD_PROGRESS_MIN_BYTES = 100 * 1024 * 1024
 
 
 class DownloadError(RuntimeError):
@@ -102,12 +104,51 @@ def cached_release_path(version: str = RELEASE_VERSION) -> Path:
     return cache_root() / version / spec["manifest_sha256"]
 
 
-def _copy_response(response: BinaryIO, handle: BinaryIO) -> None:
+def _format_size(size: int) -> str:
+    if size >= 1_000_000_000:
+        return f"{size / 1_000_000_000:.1f} GB"
+    if size >= 1_000_000:
+        return f"{size / 1_000_000:.1f} MB"
+    return f"{size / 1_000:.1f} kB"
+
+
+def _copy_response(
+    response: BinaryIO,
+    handle: BinaryIO,
+    *,
+    name: str,
+    initial_size: int,
+    expected_size: int,
+) -> None:
+    transferred = initial_size
+    progress = expected_size >= DOWNLOAD_PROGRESS_MIN_BYTES and sys.stderr.isatty()
+    last_percent = -1
+
+    def report() -> None:
+        nonlocal last_percent
+        percent = min(100, int(100 * transferred / expected_size))
+        if percent == last_percent:
+            return
+        last_percent = percent
+        print(
+            f"\rDownloading {name}: {_format_size(transferred)} / {_format_size(expected_size)} ({percent}%)",
+            end="",
+            file=sys.stderr,
+            flush=True,
+        )
+
+    if progress:
+        report()
     while True:
         chunk = response.read(DOWNLOAD_CHUNK_SIZE)
         if not chunk:
             break
         handle.write(chunk)
+        transferred += len(chunk)
+        if progress:
+            report()
+    if progress:
+        print(file=sys.stderr)
 
 
 def _download_file(url: str, destination: Path, *, expected_size: int, expected_sha256: str) -> None:
@@ -129,7 +170,13 @@ def _download_file(url: str, destination: Path, *, expected_size: int, expected_
             append = offset > 0 and status == 206
             mode = "ab" if append else "wb"
             with destination.open(mode) as handle:
-                _copy_response(response, handle)
+                _copy_response(
+                    response,
+                    handle,
+                    name=destination.name,
+                    initial_size=offset if append else 0,
+                    expected_size=expected_size,
+                )
                 handle.flush()
                 os.fsync(handle.fileno())
     except (OSError, urllib.error.URLError) as error:
@@ -210,9 +257,13 @@ def download_release(
                 expected_size=marker["size"],
                 expected_sha256=marker["sha256"],
             )
+            if sys.stderr.isatty():
+                print(f"Verifying ALMA3 {version}...", file=sys.stderr, flush=True)
             _validate_catalog_files(partial, spec)
             validate_release(partial, device="cpu", load_model=False)
             os.rename(partial, destination)
+            if sys.stderr.isatty():
+                print(f"ALMA3 {version} is ready at {destination}", file=sys.stderr, flush=True)
         except BaseException:
             if partial.exists() and not any(partial.iterdir()):
                 partial.rmdir()
@@ -244,8 +295,14 @@ def load_release(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="alma3 download", description="Download and verify the ALMA3 3.0.0 model.")
-    parser.add_argument("--output")
+    parser = argparse.ArgumentParser(
+        prog="alma3 download",
+        description="Download and verify the ALMA3 3.0.0 model.",
+    )
+    parser.add_argument(
+        "--output",
+        help="new release directory; omit to use the managed ALMA3 cache",
+    )
     args = parser.parse_args(argv)
     print(download_release(args.output))
     return 0
