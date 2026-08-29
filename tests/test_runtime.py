@@ -317,7 +317,7 @@ class RuntimeContractTests(unittest.TestCase):
                     device="cpu",
                     embedding_sidecar=sidecar,
                 )
-            self.assertEqual(batch_sizes, [1, 1, 1])
+            self.assertEqual(batch_sizes, [2, 1])
             self.assertEqual(len(embedded), len(consumed))
             self.assertTrue(all(source is target for source, target in zip(embedded, consumed, strict=True)))
 
@@ -508,7 +508,7 @@ class RuntimeContractTests(unittest.TestCase):
                 "result.jsonl",
                 device="auto",
                 embedding_sidecar=None,
-                batch_size=1,
+                batch_size=2,
             )
         automatic = [item for item in arguments if item not in {"--artifact", "release"}]
         with patch("alma3.infer.run_inference") as run:

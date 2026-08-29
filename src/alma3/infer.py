@@ -31,7 +31,7 @@ class InputContractError(ValueError):
     """Raised when an inference input does not match the ALMA3 contract."""
 
 
-DEFAULT_INFERENCE_BATCH_SIZE = 1
+DEFAULT_INFERENCE_BATCH_SIZE = 2
 EMBEDDING_SIDECAR_KIND = "alma3_embedding_sidecar"
 EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
 
