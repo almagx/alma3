@@ -38,6 +38,15 @@ def inspect_wheel(wheel: Path) -> None:
                         raise RuntimeError(f"wheel contains forbidden text {forbidden!r}: {info.filename}")
 
 
+def inspect_release_catalog(release: Path) -> None:
+    sys.path.insert(0, str(ROOT / "src"))
+    from alma3.download import _release_spec, _validate_catalog_files
+    from alma3.release import validate_release
+
+    _validate_catalog_files(release, _release_spec())
+    validate_release(release, device="cpu", load_model=False)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run the local ALMA3 release gate.")
     parser.add_argument("--release-artifact", type=Path)
@@ -101,6 +110,7 @@ def main() -> int:
 
         if args.release_artifact is not None:
             release = args.release_artifact.resolve()
+            inspect_release_catalog(release)
             run(
                 [
                     "docker",

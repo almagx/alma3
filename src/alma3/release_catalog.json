@@ -1,1 +1,50 @@
-{"default_version":"3.0.0","kind":"alma3_release_catalog","releases":[],"schema_version":1}
+{
+  "default_version": "3.0.0",
+  "kind": "alma3_release_catalog",
+  "releases": [
+    {
+      "base_url": "https://models.almagx.com/alma3/3.0.0/73a7fb97d8d9db151aa57704eacf6cfb3f703614c853929acd377d370d69f718/",
+      "files": {
+        "LICENSE": {
+          "sha256": "ef5e5785df26c4fc4d39d92c337ac96e9494fefb96b803c15f715147f0e222c8",
+          "size": 1070
+        },
+        "RELEASE_COMPLETE": {
+          "sha256": "37a40f08d8548dba289b9b0bb35bcf63b359f6d37ee86044ebc6b6da080b9ec1",
+          "size": 9
+        },
+        "SHA256SUMS.json": {
+          "sha256": "73a7fb97d8d9db151aa57704eacf6cfb3f703614c853929acd377d370d69f718",
+          "size": 584
+        },
+        "config.json": {
+          "sha256": "9de2787ab78954034cfa8e8787329644ef2ca57e5981789bd0af56ff47c4f850",
+          "size": 1809
+        },
+        "cpg_manifest.json": {
+          "sha256": "404f4fa5eaf6bc26eea2231d83b0463430fbbfba31f5a6d11f698a2f9ca05935",
+          "size": 6177696
+        },
+        "model.safetensors": {
+          "sha256": "ea5b028cafb62dd2be1dfcce879d53dc835265d2b3e082ce1c104c100eaff010",
+          "size": 4178107400
+        },
+        "release.json": {
+          "sha256": "67c9a59a608f5f272eab7c5e5f3a3398aefb637dafaf988e7e073012bab91087",
+          "size": 226
+        },
+        "taxonomy.json": {
+          "sha256": "202f239d5fcb7c52e3d144c29f5accfec3e740dd9d98ae93fe35d5398836f65a",
+          "size": 14777
+        },
+        "thresholds.json": {
+          "sha256": "9532f0c2fb8b03311dcd6de06458cb58380cd1ccd38ac89d0245545a8fc40c62",
+          "size": 15369
+        }
+      },
+      "manifest_sha256": "73a7fb97d8d9db151aa57704eacf6cfb3f703614c853929acd377d370d69f718",
+      "version": "3.0.0"
+    }
+  ],
+  "schema_version": 1
+}
