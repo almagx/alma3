@@ -247,9 +247,7 @@ def load_bed_methyl_with_manifest(
     input_path = Path(path)
     if cpg.chrom is None or cpg.start is None:
         raise InputContractError("bedMethyl inference requires chrom and genomic start in CpG manifest")
-    coord_to_indices: dict[tuple[str, int], list[int]] = {}
-    for idx, coordinate in enumerate(zip(cpg.chrom, cpg.start, strict=True)):
-        coord_to_indices.setdefault(coordinate, []).append(idx)
+    coord_to_indices = cpg.coordinate_index
     values = torch.zeros(len(cpg.cpg_ids), dtype=torch.float32)
     observed = torch.zeros(len(cpg.cpg_ids), dtype=torch.bool)
     coverage_by_cpg = torch.zeros(len(cpg.cpg_ids), dtype=torch.int64)

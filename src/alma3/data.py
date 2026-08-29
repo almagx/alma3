@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,23 @@ class CpGManifest:
     arm_id: torch.Tensor | None = None
     chrom: tuple[str, ...] | None = None
     start: tuple[int, ...] | None = None
+
+    @cached_property
+    def cpg_index(self) -> dict[str, int]:
+        """Return the reusable release index for CpG-aligned inputs."""
+
+        return {cpg_id: index for index, cpg_id in enumerate(self.cpg_ids)}
+
+    @cached_property
+    def coordinate_index(self) -> dict[tuple[str, int], list[int]]:
+        """Return the reusable BedMethyl coordinate index."""
+
+        if self.chrom is None or self.start is None:
+            raise DataContractError("CpG manifest requires chrom and start arrays")
+        collected: dict[tuple[str, int], list[int]] = {}
+        for index, coordinate in enumerate(zip(self.chrom, self.start, strict=True)):
+            collected.setdefault(coordinate, []).append(index)
+        return collected
 
     @classmethod
     def load(cls, path: str | Path) -> CpGManifest:

@@ -36,6 +36,25 @@ def _require_batch_size(value: int) -> int:
     return value
 
 
+def _align_array_batch(
+    values: torch.Tensor,
+    source_indices: torch.Tensor,
+    target_indices: torch.Tensor,
+    target_width: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    matched = values[:, source_indices].detach().to(device="cpu", dtype=torch.float32)
+    if bool(torch.isinf(matched).any().item()):
+        raise ValueError("beta values must not contain infinity")
+    finite = torch.isfinite(matched)
+    if bool(((matched[finite] < 0) | (matched[finite] > 1)).any().item()):
+        raise ValueError("observed beta values must be in [0, 1]")
+    aligned = torch.zeros((values.shape[0], target_width), dtype=torch.float32)
+    observed = torch.zeros_like(aligned, dtype=torch.bool)
+    aligned[:, target_indices] = torch.where(finite, matched, 0.0)
+    observed[:, target_indices] = finite
+    return aligned, observed
+
+
 class ALMA3:
     """Load one ALMA3-Dx release and reuse it for one or many samples."""
 
@@ -184,18 +203,15 @@ class ALMA3:
         if not columns or any(not value for value in columns) or len(columns) != len(set(columns)):
             raise ValueError("cpg_ids must be nonempty and unique")
         try:
-            values = torch.as_tensor(beta, dtype=torch.float32)
-        except (TypeError, ValueError) as error:
+            values = torch.as_tensor(beta)
+        except (TypeError, ValueError, RuntimeError) as error:
             raise ValueError("beta must be a numeric one- or two-dimensional array") from error
         if values.ndim == 1:
             values = values[None, :]
         if values.ndim != 2 or values.shape[1] != len(columns) or values.shape[0] == 0:
             raise ValueError("beta shape must be [samples, len(cpg_ids)]")
-        if bool(torch.isinf(values).any().item()):
-            raise ValueError("beta values must not contain infinity")
-        finite = torch.isfinite(values)
-        if bool(((values[finite] < 0) | (values[finite] > 1)).any().item()):
-            raise ValueError("observed beta values must be in [0, 1]")
+        if values.layout != torch.strided or values.is_complex():
+            raise ValueError("beta must be a real, dense array")
         ids = (
             [f"sample-{index + 1}" for index in range(values.shape[0])]
             if sample_ids is None
@@ -204,26 +220,34 @@ class ALMA3:
         if len(ids) != values.shape[0] or any(not value.strip() for value in ids) or len(ids) != len(set(ids)):
             raise ValueError("sample_ids must be nonempty, unique, and match beta rows")
 
-        release_index = {name: index for index, name in enumerate(self.cpg.cpg_ids)}
-        aligned = torch.zeros((values.shape[0], len(self.cpg.cpg_ids)), dtype=torch.float32)
-        observed = torch.zeros_like(aligned, dtype=torch.bool)
-        for source_index, name in enumerate(columns):
-            target_index = release_index.get(name)
-            if target_index is None:
-                continue
-            column_observed = finite[:, source_index]
-            aligned[:, target_index] = torch.where(column_observed, values[:, source_index], 0.0)
-            observed[:, target_index] = column_observed
+        matched = [
+            (source_index, target_index)
+            for source_index, name in enumerate(columns)
+            if (target_index := self.cpg.cpg_index.get(name)) is not None
+        ]
+        if not matched:
+            raise ValueError("cpg_ids do not contain any CpGs used by the release")
+        source_indices = torch.tensor(
+            [source for source, _ in matched],
+            dtype=torch.long,
+            device=values.device,
+        )
+        target_indices = torch.tensor([target for _, target in matched], dtype=torch.long)
 
         results: list[dict[str, Any]] = []
-        uncertainty = torch.zeros_like(aligned)
         for start in range(0, len(ids), size):
             stop = min(start + size, len(ids))
+            aligned, observed = _align_array_batch(
+                values[start:stop],
+                source_indices,
+                target_indices,
+                len(self.cpg.cpg_ids),
+            )
             batch_results, _, _ = self._predict_tensors(
                 ids[start:stop],
-                aligned[start:stop],
-                observed[start:stop],
-                uncertainty[start:stop],
+                aligned,
+                observed,
+                torch.zeros_like(aligned),
             )
             results.extend(batch_results)
         return results

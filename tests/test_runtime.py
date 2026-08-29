@@ -18,6 +18,7 @@ from alma3 import ALMA3
 from alma3.cli import main as cli_main
 from alma3.clinical_result import validate_result
 from alma3.config import DxConfig
+from alma3.data import CpGManifest
 from alma3.dx import DX_TARGETS, DiagnosticModel
 from alma3.hashes import publish_new_file as publish_new_file_actual
 from alma3.infer import (
@@ -29,6 +30,7 @@ from alma3.infer import (
 from alma3.infer import main as infer_main
 from alma3.model import FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
+from alma3.runtime import _align_array_batch
 from tests.helpers import (
     create_release,
     foundation_config,
@@ -57,6 +59,23 @@ def _assert_json_close(test: unittest.TestCase, left, right, *, atol: float = 1e
 
 
 class RuntimeContractTests(unittest.TestCase):
+    def test_bedmethyl_coordinate_index_is_cached_and_preserves_duplicate_probes(self) -> None:
+        manifest = CpGManifest(
+            cpg_ids=("first", "second"),
+            chr_id=torch.tensor([0, 0]),
+            pos=torch.tensor([0.1, 0.1]),
+            chrom=("chr1", "chr1"),
+            start=(100, 100),
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            bed = Path(raw) / "sample.bed"
+            bed.write_text("chr1\t100\t101\t.\t0\t.\t100\t101\t0\t10\t50\n", encoding="utf-8")
+            _, beta, observed, coverage = load_bed_methyl_with_manifest(bed, manifest)
+        self.assertIs(manifest.coordinate_index, manifest.coordinate_index)
+        self.assertEqual(beta.tolist(), [[0.5, 0.5]])
+        self.assertEqual(observed.tolist(), [[True, True]])
+        self.assertEqual(coverage.tolist(), [[10, 10]])
+
     def test_package_module_entrypoint_and_concise_cli_errors(self) -> None:
         completed = subprocess.run(
             [sys.executable, "-m", "alma3", "--version"],
@@ -126,8 +145,9 @@ class RuntimeContractTests(unittest.TestCase):
             root = Path(raw)
             release, model = create_release(root / "release")
             validated = validated_release_fixture(release, model)
-            cpg_ids = list(validated["cpg"].cpg_ids)
+            cpg_ids = [*validated["cpg"].cpg_ids, "unused-cpg"]
             beta = torch.full((3, len(cpg_ids)), 0.5)
+            beta[:, -1] = 2.0
             embedded_batch_sizes: list[int] = []
             original_embed = DiagnosticModel.embed
 
@@ -138,6 +158,7 @@ class RuntimeContractTests(unittest.TestCase):
             with (
                 patch("alma3.runtime.load_release", return_value=validated) as load,
                 patch.object(DiagnosticModel, "embed", record_embed),
+                patch("alma3.runtime._align_array_batch", wraps=_align_array_batch) as align,
             ):
                 runtime = ALMA3(release, device="cpu")
                 results = runtime.predict_array(
@@ -148,6 +169,7 @@ class RuntimeContractTests(unittest.TestCase):
                 )
             load.assert_called_once_with(release, device="cpu")
             self.assertEqual(embedded_batch_sizes, [2, 1])
+            self.assertEqual([int(call.args[0].shape[0]) for call in align.call_args_list], [2, 1])
             self.assertEqual([result["sample_id"] for result in results], ["first", "second", "third"])
 
     def test_embedding_api_and_forward_are_exactly_equivalent(self) -> None:
