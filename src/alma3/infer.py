@@ -7,13 +7,13 @@ import json
 import math
 import os
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
 import torch
 
-from .clinical_result import results_from_logits, serialize_result
+from .clinical_result import serialize_result
 from .data import CpGManifest
 from .dx import (
     DX_REPRESENTATION_DIMENSIONS,
@@ -22,7 +22,8 @@ from .dx import (
     DX_REPRESENTATION_VERSION,
 )
 from .hashes import publish_new_file, validate_new_external_outputs
-from .release import revalidate_release_identity, validate_release
+from .release import revalidate_release_identity
+from .runtime import ALMA3
 from .sitewise import real_coverage_presentation
 
 
@@ -30,7 +31,7 @@ class InputContractError(ValueError):
     """Raised when an inference input does not match the ALMA 3 contract."""
 
 
-INFERENCE_BATCH_SIZE = 2
+DEFAULT_INFERENCE_BATCH_SIZE = 2
 EMBEDDING_SIDECAR_KIND = "alma3_embedding_sidecar"
 EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
 
@@ -140,8 +141,13 @@ def _stat_identity(value: os.stat_result) -> tuple[int, int, int, int]:
 
 
 def _array_csv_batches(
-    path: str | Path, cpg: CpGManifest
+    path: str | Path,
+    cpg: CpGManifest,
+    *,
+    batch_size: int = DEFAULT_INFERENCE_BATCH_SIZE,
 ) -> Iterator[tuple[list[str], torch.Tensor, torch.Tensor]]:
+    if type(batch_size) is not int or batch_size <= 0:
+        raise InputContractError("batch_size must be a positive integer")
     input_path = Path(path)
     opener = gzip.open if input_path.name.endswith(".gz") else open
     with opener(input_path, "rt", encoding="utf-8", newline="") as handle:
@@ -201,7 +207,7 @@ def _array_csv_batches(
             sample_ids.append(sample_id)
             values.append(sample_values)
             observed_rows.append(sample_observed)
-            if len(values) == INFERENCE_BATCH_SIZE:
+            if len(values) == batch_size:
                 yield (
                     sample_ids,
                     torch.tensor(values, dtype=torch.float32),
@@ -295,58 +301,99 @@ def load_bed_methyl_with_manifest(
     return [sid], values[None, :], observed[None, :], coverage_by_cpg[None, :]
 
 
+def _input_paths(value: str | Path | Sequence[str | Path]) -> list[Path]:
+    paths = [Path(value)] if isinstance(value, (str, Path)) else [Path(item) for item in value]
+    if not paths:
+        raise InputContractError("at least one inference input is required")
+    invalid = [str(path) for path in paths if not path.is_file()]
+    if invalid:
+        raise InputContractError(f"inference input is not a file: {invalid[:5]}")
+    return paths
+
+
+def _bedmethyl_batches(
+    paths: Sequence[Path],
+    cpg: CpGManifest,
+    *,
+    batch_size: int,
+) -> Iterator[tuple[list[str], torch.Tensor, torch.Tensor, torch.Tensor]]:
+    sample_ids: list[str] = []
+    beta_rows: list[torch.Tensor] = []
+    observed_rows: list[torch.Tensor] = []
+    uncertainty_rows: list[torch.Tensor] = []
+    seen: set[str] = set()
+    for path in paths:
+        ids, beta, observed, coverage = load_bed_methyl_with_manifest(path, cpg)
+        sample_id = ids[0]
+        if sample_id in seen:
+            raise InputContractError(f"duplicate BedMethyl sample ID: {sample_id}")
+        seen.add(sample_id)
+        presentation = real_coverage_presentation(beta, observed, coverage)
+        sample_ids.append(sample_id)
+        beta_rows.append(presentation.beta_input)
+        observed_rows.append(presentation.input_observed)
+        uncertainty_rows.append(presentation.uncertainty)
+        if len(sample_ids) == batch_size:
+            yield (
+                sample_ids,
+                torch.cat(beta_rows),
+                torch.cat(observed_rows),
+                torch.cat(uncertainty_rows),
+            )
+            sample_ids, beta_rows, observed_rows, uncertainty_rows = [], [], [], []
+    if sample_ids:
+        yield (
+            sample_ids,
+            torch.cat(beta_rows),
+            torch.cat(observed_rows),
+            torch.cat(uncertainty_rows),
+        )
+
+
 def run_inference(
-    artifact: str | Path,
-    input_path: str | Path,
+    artifact: str | Path | None,
+    input_path: str | Path | Sequence[str | Path],
     input_format: str,
     output: str | Path,
     *,
     device: str = "auto",
     embedding_sidecar: str | Path | None = None,
+    batch_size: int = DEFAULT_INFERENCE_BATCH_SIZE,
 ) -> Path:
-    root = Path(artifact)
-    outputs = validate_new_external_outputs(
-        root,
+    if type(batch_size) is not int or batch_size <= 0:
+        raise InputContractError("batch_size must be a positive integer")
+    inputs = _input_paths(input_path)
+    if input_format == "array-csv" and len(inputs) != 1:
+        raise InputContractError("array-csv accepts exactly one input file")
+    if input_format not in {"array-csv", "bedmethyl"}:
+        raise InputContractError("input_format must be array-csv or bedmethyl")
+    validate_new_external_outputs(
+        None,
         {"inference output": output, "embedding sidecar": embedding_sidecar},
-        inputs=(input_path,),
+        inputs=inputs,
+    )
+    runtime = ALMA3(artifact, device=device)
+    outputs = validate_new_external_outputs(
+        runtime.artifact,
+        {"inference output": output, "embedding sidecar": embedding_sidecar},
+        inputs=inputs,
     )
     out = outputs["inference output"]
     sidecar_out = outputs.get("embedding sidecar")
-    torch_device = _resolve_device(device)
-    validated = validate_release(root, device=torch_device)
+    validated = runtime.validated_release
     hashes = validated["hashes"]
-    thresholds = validated["thresholds"]
-    taxonomy = validated["taxonomy"]
-    cpg = validated["cpg"]
-    model = validated["model"]
-    release = {
-        "model_sha256": hashes["model.safetensors"],
-        "taxonomy_sha256": hashes["taxonomy.json"],
-        "thresholds_sha256": hashes["thresholds.json"],
-    }
-    sidecar_release = {
-        "manifest_sha256": validated["manifest_sha256"],
-        "model_sha256": hashes["model.safetensors"],
-        "taxonomy_sha256": hashes["taxonomy.json"],
-        "cpg_manifest_sha256": hashes["cpg_manifest.json"],
-        "thresholds_sha256": hashes["thresholds.json"],
-    }
     if input_format == "array-csv":
         batches = (
             (sample_ids, x, observed, torch.zeros_like(x))
-            for sample_ids, x, observed in _array_csv_batches(input_path, cpg)
-        )
-    elif input_format == "bedmethyl":
-        sample_ids, x, observed, coverage = load_bed_methyl_with_manifest(input_path, cpg)
-        presentation = real_coverage_presentation(x, observed, coverage)
-        batches = iter(
-            ((sample_ids, presentation.beta_input, presentation.input_observed, presentation.uncertainty),)
+            for sample_ids, x, observed in _array_csv_batches(
+                inputs[0],
+                runtime.cpg,
+                batch_size=batch_size,
+            )
         )
     else:
-        raise InputContractError("input_format must be array-csv or bedmethyl")
-    minimum_observed = int(thresholds["minimum_observed_cpgs"])
-    cpg_chr_id = cpg.chr_id[None, :].to(torch_device)
-    cpg_pos = cpg.pos[None, :].to(torch_device)
+        batches = _bedmethyl_batches(inputs, runtime.cpg, batch_size=batch_size)
+    minimum_observed = runtime.minimum_observed_cpgs
     out.parent.mkdir(parents=True, exist_ok=True)
     sidecar_samples: list[dict[str, Any]] = []
 
@@ -354,50 +401,30 @@ def run_inference(
     temporary = Path(raw_temporary)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as handle:
-            with torch.inference_mode():
-                for sample_ids, x, observed, uncertainty in batches:
-                    observed_counts = observed.sum(dim=1)
-                    too_sparse = [
-                        f"{sample_id}:{int(count)}"
-                        for sample_id, count in zip(sample_ids, observed_counts.tolist(), strict=True)
-                        if int(count) < minimum_observed
-                    ]
-                    if too_sparse:
-                        raise InputContractError(
-                            f"inference sample below calibrated observed-CpG floor {minimum_observed}: {too_sparse[:5]}"
+            for sample_ids, x, observed, uncertainty in batches:
+                clinical_results, embedding, observed_counts = runtime._predict_tensors(
+                    sample_ids,
+                    x,
+                    observed,
+                    uncertainty,
+                )
+                if sidecar_out is not None:
+                    vectors = embedding.detach().to(device="cpu", dtype=torch.float32).tolist()
+                    sidecar_samples.extend(
+                        {
+                            "sample_id": str(sample_id),
+                            "observed_cpg_count": observed_count,
+                            "embedding": vector,
+                        }
+                        for sample_id, observed_count, vector in zip(
+                            sample_ids,
+                            observed_counts,
+                            vectors,
+                            strict=True,
                         )
-                    chr_id = cpg_chr_id.expand(x.shape[0], -1)
-                    pos = cpg_pos.expand(x.shape[0], -1)
-                    observed = observed.to(torch_device)
-                    embedding = model.embed(
-                        x.to(torch_device),
-                        observed,
-                        uncertainty.to(torch_device),
-                        chr_id,
-                        pos,
                     )
-                    logits = model.logits_from_embedding(embedding)
-                    if sidecar_out is not None:
-                        vectors = embedding.detach().to(device="cpu", dtype=torch.float32).tolist()
-                        sidecar_samples.extend(
-                            {
-                                "sample_id": str(sample_id),
-                                "observed_cpg_count": int(observed_count),
-                                "embedding": vector,
-                            }
-                            for sample_id, observed_count, vector in zip(
-                                sample_ids, observed_counts.tolist(), vectors, strict=True
-                            )
-                        )
-                    clinical_results = results_from_logits(
-                        sample_ids,
-                        logits,
-                        thresholds,
-                        taxonomy,
-                        release,
-                    )
-                    for result in clinical_results:
-                        handle.write(serialize_result(result) + "\n")
+                for result in clinical_results:
+                    handle.write(serialize_result(result) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
         sidecar_temporary = None
@@ -407,7 +434,7 @@ def run_inference(
                 sidecar_payload = {
                     "kind": EMBEDDING_SIDECAR_KIND,
                     "schema_version": EMBEDDING_SIDECAR_SCHEMA_VERSION,
-                    "release": sidecar_release,
+                    "release": runtime.sidecar_release_identity,
                     "representation": {
                         "name": DX_REPRESENTATION_NAME,
                         "version": DX_REPRESENTATION_VERSION,
@@ -421,7 +448,7 @@ def run_inference(
                 sidecar_out.parent.mkdir(parents=True, exist_ok=True)
                 sidecar_temporary = _json_temporary(sidecar_out, sidecar_payload)
             revalidate_release_identity(
-                validated["root"],
+                runtime.artifact,
                 manifest_sha256=validated["manifest_sha256"],
                 hashes=hashes,
             )
@@ -441,26 +468,15 @@ def run_inference(
     return out
 
 
-def _resolve_device(device: str) -> torch.device:
-    if device == "auto":
-        return torch.device("cuda", torch.cuda.current_device()) if torch.cuda.is_available() else torch.device("cpu")
-    if device == "cpu":
-        return torch.device("cpu")
-    if device == "cuda":
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA requested but torch.cuda.is_available() is false")
-        return torch.device("cuda", torch.cuda.current_device())
-    raise InputContractError("device must be auto, cpu, or cuda")
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="alma3 infer", description="Run ALMA 3-Dx inference.")
-    parser.add_argument("--artifact", required=True)
-    parser.add_argument("--input", required=True)
+    parser.add_argument("--artifact")
+    parser.add_argument("--input", required=True, action="append")
     parser.add_argument("--format", required=True, choices=["array-csv", "bedmethyl"])
     parser.add_argument("--output", required=True)
     parser.add_argument("--embedding-sidecar")
-    parser.add_argument("--device", default="auto", choices=["auto", "cpu", "cuda"])
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_INFERENCE_BATCH_SIZE)
     args = parser.parse_args(argv)
     run_inference(
         args.artifact,
@@ -469,6 +485,7 @@ def main(argv: list[str] | None = None) -> int:
         args.output,
         device=args.device,
         embedding_sidecar=args.embedding_sidecar,
+        batch_size=args.batch_size,
     )
     return 0
 

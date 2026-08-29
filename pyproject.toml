@@ -4,16 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alma3"
-version = "0.1.0"
-description = "Inference-only runtime for ALMA3 diagnostic models"
+version = "3.0.0"
+description = "ALMA3 foundation and diagnostic inference"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.10,<3.13"
 authors = [{ name = "ALMA Genomics" }]
 license = { file = "LICENSE" }
 dependencies = [
   "torch==2.7.0",
   "safetensors==0.8.0",
-  "numpy==1.26.4"
+  "numpy==1.26.4",
+  "filelock==3.29.0"
 ]
 
 [project.optional-dependencies]
@@ -28,8 +29,8 @@ alma3 = "alma3.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-alma3 = ["schemas/*.json"]
+alma3 = ["schemas/*.json", "release_catalog.json"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py310"

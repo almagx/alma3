@@ -238,29 +238,18 @@ def create_release(root: Path) -> tuple[Path, DiagnosticModel]:
     thresholds = threshold_payload(bindings)
     write_json(root / "thresholds.json", thresholds)
     write_json(
-        root / "release_provenance.json",
+        root / "release.json",
         {
-            "kind": "alma3_dx_release_provenance",
-            "schema_version": 7,
-            "generated_at": "20260827T000000Z",
-            "evaluation_git_commit": "8" * 40,
-            "training_manifest_sha256": thresholds["training_manifest_sha256"],
-            "evaluation_freeze_sha256": "9" * 64,
-            "thresholds_sha256": sha256(root / "thresholds.json"),
-            "selection_calibration_sha256": thresholds["selection_calibration_sha256"],
-            "challenge_report_sha256": "a" * 64,
-            "challenge_envelope_sha256": "b" * 64,
-            "challenge_count_sha256": "c" * 64,
-            "challenge_protocol": "locked_alma_challenge_v5_per_cpg_uncertainty_v1",
-            "challenge_accounting": {
-                "assays": 62,
-                "subjects": 55,
-                "longread_assays": 60,
-                "array_assays": 2,
-            },
-            "challenge_metrics_are_descriptive": True,
-            "input_contract": "per_cpg_uncertainty_v1",
+            "kind": "alma3_release",
+            "schema_version": 1,
+            "version": "3.0.0",
+            "runtime_git_commit": "a" * 40,
+            "source_release_manifest_sha256": "b" * 64,
         },
+    )
+    (root / "LICENSE").write_text(
+        "MIT License\n\nCopyright (c) 2026 ALMA Genomics\n",
+        encoding="utf-8",
     )
     names = (
         "config.json",
@@ -268,7 +257,8 @@ def create_release(root: Path) -> tuple[Path, DiagnosticModel]:
         "taxonomy.json",
         "cpg_manifest.json",
         "thresholds.json",
-        "release_provenance.json",
+        "release.json",
+        "LICENSE",
     )
     write_json(root / "SHA256SUMS.json", {name: sha256(root / name) for name in names})
     (root / "RELEASE_COMPLETE").write_text("complete\n", encoding="utf-8")
@@ -285,7 +275,7 @@ def validated_release_fixture(root: Path, model: DiagnosticModel) -> dict[str, A
         "taxonomy": load_taxonomy(root / "taxonomy.json"),
         "cpg": CpGManifest.load(root / "cpg_manifest.json"),
         "thresholds": load_thresholds(root / "thresholds.json"),
-        "provenance": json.loads((root / "release_provenance.json").read_text(encoding="utf-8")),
+        "release": json.loads((root / "release.json").read_text(encoding="utf-8")),
         "model": model,
     }
 
@@ -304,4 +294,12 @@ def write_array_csv(
     for sample_index in range(sample_count):
         values = ["0.5" if index < observed else "" for index in range(len(cpg_ids))]
         rows.append(",".join([f"sample-{sample_index + 1}", *values]))
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
+def write_bedmethyl(path: Path, *, fraction_modified: float = 50.0) -> None:
+    rows = [
+        f"chr1\t{start}\t{start + 1}\t.\t0\t.\t{start}\t{start + 1}\t0\t10\t{fraction_modified}"
+        for start in range(100, 100 + MINIMUM_RUNTIME_INPUT_CPGS)
+    ]
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")

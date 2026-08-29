@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+FORBIDDEN_NAMES = {".safetensors", ".pt", ".pth", ".h5", ".hdf5"}
+FORBIDDEN_TEXT = (b"/home/", b"/data/", b"pac" + b"map", b"fai" + b"ss")
+PYTHON_IMAGES = {
+    "3.10": "python:3.10-slim-bookworm",
+    "3.11": "python:3.11-slim-bookworm",
+    "3.12": None,
+}
+
+
+def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
+    print("+", " ".join(command), flush=True)
+    subprocess.run(command, cwd=ROOT, env=env, check=True)
+
+
+def inspect_wheel(wheel: Path) -> None:
+    with zipfile.ZipFile(wheel) as archive:
+        for info in archive.infolist():
+            name = info.filename.lower()
+            if Path(name).suffix in FORBIDDEN_NAMES:
+                raise RuntimeError(f"wheel contains forbidden binary: {info.filename}")
+            if info.file_size <= 2 * 1024 * 1024:
+                content = archive.read(info).lower()
+                for forbidden in FORBIDDEN_TEXT:
+                    if forbidden in content:
+                        raise RuntimeError(f"wheel contains forbidden text {forbidden!r}: {info.filename}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run the local ALMA3 release gate.")
+    parser.add_argument("--release-artifact", type=Path)
+    parser.add_argument("--skip-docker-matrix", action="store_true")
+    args = parser.parse_args()
+
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(ROOT / "src")
+    ruff = shutil.which("ruff")
+    if ruff:
+        run([ruff, "check", "src", "tests"])
+    run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], env=environment)
+
+    with tempfile.TemporaryDirectory(prefix="alma3-release-gate-") as raw:
+        wheel_dir = Path(raw) / "wheel"
+        wheel_dir.mkdir()
+        run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "wheel",
+                "--no-deps",
+                "--no-build-isolation",
+                "--wheel-dir",
+                str(wheel_dir),
+                ".",
+            ]
+        )
+        wheels = list(wheel_dir.glob("alma3-3.0.0-*.whl"))
+        if len(wheels) != 1:
+            raise RuntimeError("release gate did not build exactly one ALMA3 3.0.0 wheel")
+        inspect_wheel(wheels[0])
+
+        if not args.skip_docker_matrix:
+            for version, image in PYTHON_IMAGES.items():
+                tag = f"alma3-runtime:3.0.0-py{version.replace('.', '')}-rc"
+                command = ["docker", "build", "--target", "runtime", "-t", tag]
+                if image is not None:
+                    command.extend(["--build-arg", f"PYTHON_IMAGE={image}"])
+                command.append(".")
+                run(command)
+                run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "--user",
+                        "0:0",
+                        "--entrypoint",
+                        "sh",
+                        "-v",
+                        f"{wheel_dir}:/wheel:ro",
+                        tag,
+                        "-c",
+                        "python -m pip uninstall -y alma3 >/dev/null && "
+                        "python -m pip install --no-deps /wheel/alma3-3.0.0-*.whl >/dev/null && "
+                        "alma3 --version",
+                    ]
+                )
+
+        if args.release_artifact is not None:
+            release = args.release_artifact.resolve()
+            run(
+                [
+                    "docker",
+                    "build",
+                    "--build-context",
+                    f"alma3_release={release}",
+                    "-t",
+                    "alma3:3.0.0-rc",
+                    ".",
+                ]
+            )
+            run(["docker", "run", "--rm", "alma3:3.0.0-rc", "verify-release"])
+    print("ALMA3 release gate passed", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,4 +1,5 @@
-FROM python:3.12.13-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2 AS runtime
+ARG PYTHON_IMAGE=python:3.12.13-slim-bookworm@sha256:4766d8b510c428e595d74b9cc5bbb2fae8e26316fffb4adc89908d79aacd58a2
+FROM ${PYTHON_IMAGE} AS runtime
 
 WORKDIR /app
 
@@ -25,7 +26,17 @@ ENV PYTHONUNBUFFERED=1 \
 RUN useradd -m -u 1000 almauser && chown -R almauser:almauser /app
 USER almauser
 
-RUN alma3 --help
+RUN alma3 --version
 
 ENTRYPOINT ["alma3-entrypoint"]
 CMD ["alma3", "--help"]
+
+FROM runtime AS standalone
+
+USER root
+COPY --from=alma3_release --chown=almauser:almauser / /opt/alma3/release/
+USER almauser
+
+ENV ALMA3_RELEASE=/opt/alma3/release
+
+RUN alma3 verify-release

@@ -21,11 +21,13 @@ class RepositoryBoundaryTests(unittest.TestCase):
                 "clinical_result.py",
                 "config.py",
                 "data.py",
+                "download.py",
                 "dx.py",
                 "hashes.py",
                 "infer.py",
                 "model.py",
                 "release.py",
+                "runtime.py",
                 "sitewise.py",
             },
         )

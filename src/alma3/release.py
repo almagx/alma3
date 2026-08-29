@@ -23,58 +23,28 @@ from .model import validate_chromosome_layout
 
 RELEASE_PAYLOADS = frozenset(
     {
+        "release.json",
         "config.json",
         "model.safetensors",
         "taxonomy.json",
         "cpg_manifest.json",
         "thresholds.json",
-        "release_provenance.json",
+        "LICENSE",
     }
 )
 RELEASE_FILES = RELEASE_PAYLOADS | {"SHA256SUMS.json", "RELEASE_COMPLETE"}
-RELEASE_PROVENANCE_KIND = "alma3_dx_release_provenance"
-RELEASE_PROVENANCE_SCHEMA_VERSIONS = frozenset({7, 8})
-RELEASE_PROVENANCE_V7_FIELDS = frozenset(
+RELEASE_KIND = "alma3_release"
+RELEASE_SCHEMA_VERSION = 1
+RELEASE_VERSION = "3.0.0"
+RELEASE_METADATA_FIELDS = frozenset(
     {
         "kind",
         "schema_version",
-        "generated_at",
-        "evaluation_git_commit",
-        "training_manifest_sha256",
-        "evaluation_freeze_sha256",
-        "thresholds_sha256",
-        "selection_calibration_sha256",
-        "challenge_report_sha256",
-        "challenge_envelope_sha256",
-        "challenge_count_sha256",
-        "challenge_protocol",
-        "challenge_accounting",
-        "challenge_metrics_are_descriptive",
-        "input_contract",
+        "version",
+        "runtime_git_commit",
+        "source_release_manifest_sha256",
     }
 )
-RELEASE_PROVENANCE_V8_FIELDS = RELEASE_PROVENANCE_V7_FIELDS | {
-    "training_git_commit",
-    "runtime_git_commit",
-}
-PROVENANCE_SHA256_FIELDS = frozenset(
-    {
-        "training_manifest_sha256",
-        "evaluation_freeze_sha256",
-        "thresholds_sha256",
-        "selection_calibration_sha256",
-        "challenge_report_sha256",
-        "challenge_envelope_sha256",
-        "challenge_count_sha256",
-    }
-)
-CHALLENGE_PROTOCOL = "locked_alma_challenge_v5_per_cpg_uncertainty_v1"
-CHALLENGE_ACCOUNTING = {
-    "assays": 62,
-    "subjects": 55,
-    "longread_assays": 60,
-    "array_assays": 2,
-}
 CPG_MANIFEST_SCHEMA_VERSION = 1
 CPG_MANIFEST_REQUIRED_FIELDS = frozenset(
     {
@@ -108,7 +78,7 @@ def _is_sha256(value: object) -> bool:
 def _is_revision(value: object) -> bool:
     return (
         isinstance(value, str)
-        and len(value) in {40, 64}
+        and len(value) == 40
         and value == value.lower()
         and all(character in "0123456789abcdef" for character in value)
     )
@@ -187,6 +157,7 @@ def validate_release(
     artifact: str | Path,
     *,
     device: torch.device | str = "cpu",
+    load_model: bool = True,
 ) -> dict[str, Any]:
     artifact_path = Path(artifact)
     if artifact_path.is_symlink():
@@ -202,6 +173,23 @@ def validate_release(
     hashes = verify_sha256_manifest(root, required=RELEASE_PAYLOADS)
     if set(hashes) != RELEASE_PAYLOADS:
         raise DxContractError("release SHA256 manifest entries are invalid")
+
+    release_metadata = _read_object(root / "release.json", "release metadata")
+    if (
+        set(release_metadata) != RELEASE_METADATA_FIELDS
+        or release_metadata.get("kind") != RELEASE_KIND
+        or release_metadata.get("schema_version") != RELEASE_SCHEMA_VERSION
+        or release_metadata.get("version") != RELEASE_VERSION
+        or not _is_revision(release_metadata.get("runtime_git_commit"))
+        or not _is_sha256(release_metadata.get("source_release_manifest_sha256"))
+    ):
+        raise DxContractError("release metadata contract is invalid")
+    try:
+        license_text = (root / "LICENSE").read_text(encoding="utf-8")
+    except OSError as error:
+        raise DxContractError("release license is unreadable") from error
+    if not license_text.startswith("MIT License\n"):
+        raise DxContractError("release license must be MIT")
 
     config_payload = _read_object(root / "config.json", "release model config")
     if set(config_payload) != {"foundation", "targets", "hidden_dim", "dropout"}:
@@ -243,42 +231,10 @@ def validate_release(
     validate_chromosome_layout(config.foundation, cpg.chr_id, cpg.arm_id)
 
     thresholds = load_thresholds(root / "thresholds.json")
-    provenance = _read_object(root / "release_provenance.json", "release provenance")
-    schema_version = provenance.get("schema_version")
-    expected_provenance_fields = {
-        7: RELEASE_PROVENANCE_V7_FIELDS,
-        8: RELEASE_PROVENANCE_V8_FIELDS,
-    }.get(schema_version)
-    if (
-        expected_provenance_fields is None
-        or set(provenance) != expected_provenance_fields
-        or provenance.get("kind") != RELEASE_PROVENANCE_KIND
-        or schema_version not in RELEASE_PROVENANCE_SCHEMA_VERSIONS
-        or not isinstance(provenance.get("generated_at"), str)
-        or not provenance["generated_at"]
-        or not _is_revision(provenance.get("evaluation_git_commit"))
-        or any(not _is_sha256(provenance.get(field)) for field in PROVENANCE_SHA256_FIELDS)
-        or provenance.get("thresholds_sha256") != hashes["thresholds.json"]
-        or provenance.get("challenge_protocol") != CHALLENGE_PROTOCOL
-        or provenance.get("challenge_accounting") != CHALLENGE_ACCOUNTING
-        or provenance.get("challenge_metrics_are_descriptive") is not True
-        or provenance.get("input_contract") != "per_cpg_uncertainty_v1"
-    ):
-        raise DxContractError("release provenance contract is invalid")
-    if schema_version == 8 and (
-        not _is_revision(provenance.get("training_git_commit"))
-        or not _is_revision(provenance.get("runtime_git_commit"))
-        or len(provenance["training_git_commit"]) != 40
-        or len(provenance["runtime_git_commit"]) != 40
-        or provenance["training_git_commit"] != provenance["evaluation_git_commit"]
-    ):
-        raise DxContractError("release source provenance is invalid")
     expected_threshold_bindings = {
         "model_sha256": hashes["model.safetensors"],
         "taxonomy_sha256": hashes["taxonomy.json"],
         "cpg_manifest_sha256": hashes["cpg_manifest.json"],
-        "training_manifest_sha256": provenance["training_manifest_sha256"],
-        "selection_calibration_sha256": provenance["selection_calibration_sha256"],
     }
     mismatches = [
         field for field, expected in expected_threshold_bindings.items() if thresholds.get(field) != expected
@@ -287,21 +243,13 @@ def validate_release(
         mismatches
         or thresholds.get("operating_policy_met") is not True
         or thresholds.get("evaluation_git_clean") is not True
-        or (
-            provenance["schema_version"] == 8
-            and thresholds.get("evaluation_git_commit") != provenance["training_git_commit"]
-        )
     ):
         raise DxContractError(
             "release threshold bindings are invalid"
             + (f": {', '.join(sorted(mismatches))}" if mismatches else "")
         )
 
-    model = load_dx(root, device=device)
-    taxonomy.validate_sizes(model.config.targets)
-    if model.config != config:
-        raise DxContractError("loaded model configuration differs from the validated release config")
-    return {
+    validated = {
         "root": root,
         "hashes": hashes,
         "manifest_sha256": sha256_file(root / "SHA256SUMS.json"),
@@ -309,9 +257,15 @@ def validate_release(
         "taxonomy": taxonomy,
         "cpg": cpg,
         "thresholds": thresholds,
-        "provenance": provenance,
-        "model": model,
+        "release": release_metadata,
     }
+    if load_model:
+        model = load_dx(root, device=device)
+        taxonomy.validate_sizes(model.config.targets)
+        if model.config != config:
+            raise DxContractError("loaded model configuration differs from the validated release config")
+        validated["model"] = model
+    return validated
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -319,12 +273,15 @@ def main(argv: list[str] | None = None) -> int:
         prog="alma3 verify-release",
         description="Verify a complete, checksum-bound ALMA3 release artifact.",
     )
-    parser.add_argument("--artifact", required=True)
+    parser.add_argument("--artifact")
     args = parser.parse_args(argv)
-    validated = validate_release(args.artifact, device="cpu")
+    from .download import load_release
+
+    validated = load_release(args.artifact, device="cpu")
     summary = {
         "kind": "alma3_release_verification",
         "schema_version": 1,
+        "release_version": validated["release"]["version"],
         "manifest_sha256": validated["manifest_sha256"],
         "model_sha256": validated["hashes"]["model.safetensors"],
         "taxonomy_sha256": validated["hashes"]["taxonomy.json"],

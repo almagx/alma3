@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import torch
 
+from alma3 import ALMA3
 from alma3.clinical_result import validate_result
 from alma3.config import DxConfig
 from alma3.dx import DX_TARGETS, DiagnosticModel
@@ -29,6 +30,7 @@ from tests.helpers import (
     sha256,
     validated_release_fixture,
     write_array_csv,
+    write_bedmethyl,
     write_json,
 )
 
@@ -50,6 +52,82 @@ def _assert_json_close(test: unittest.TestCase, left, right, *, atol: float = 1e
 
 
 class RuntimeContractTests(unittest.TestCase):
+    def test_multiple_bedmethyl_inputs_share_one_batch_and_preserve_order(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            first = root / "first.bed"
+            second = root / "second.bed"
+            write_bedmethyl(first)
+            write_bedmethyl(second, fraction_modified=25.0)
+            output = root / "result.jsonl"
+            embedded_batch_sizes: list[int] = []
+            original_embed = DiagnosticModel.embed
+
+            def record_embed(instance, beta, *args, **kwargs):
+                embedded_batch_sizes.append(int(beta.shape[0]))
+                return original_embed(instance, beta, *args, **kwargs)
+
+            with (
+                patch("alma3.runtime.load_release", return_value=validated),
+                patch.object(DiagnosticModel, "embed", record_embed),
+            ):
+                run_inference(
+                    release,
+                    [first, second],
+                    "bedmethyl",
+                    output,
+                    device="cpu",
+                    batch_size=2,
+                )
+            results = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(embedded_batch_sizes, [2])
+            self.assertEqual([result["sample_id"] for result in results], ["first", "second"])
+
+    def test_invalid_outputs_fail_before_model_loading(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            input_path = root / "input.csv"
+            input_path.write_text("sample_id,cg0000000\nsample,0.5\n", encoding="utf-8")
+            output = root / "existing.jsonl"
+            output.write_text("existing\n", encoding="utf-8")
+            with (
+                patch("alma3.infer.ALMA3") as runtime,
+                self.assertRaisesRegex(FileExistsError, "already exists"),
+            ):
+                run_inference(None, input_path, "array-csv", output)
+            runtime.assert_not_called()
+
+    def test_python_api_loads_once_batches_and_preserves_order(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            cpg_ids = list(validated["cpg"].cpg_ids)
+            beta = torch.full((3, len(cpg_ids)), 0.5)
+            embedded_batch_sizes: list[int] = []
+            original_embed = DiagnosticModel.embed
+
+            def record_embed(instance, values, *args, **kwargs):
+                embedded_batch_sizes.append(int(values.shape[0]))
+                return original_embed(instance, values, *args, **kwargs)
+
+            with (
+                patch("alma3.runtime.load_release", return_value=validated) as load,
+                patch.object(DiagnosticModel, "embed", record_embed),
+            ):
+                runtime = ALMA3(release, device="cpu")
+                results = runtime.predict_array(
+                    beta,
+                    cpg_ids,
+                    ["first", "second", "third"],
+                    batch_size=2,
+                )
+            load.assert_called_once_with(release, device="cpu")
+            self.assertEqual(embedded_batch_sizes, [2, 1])
+            self.assertEqual([result["sample_id"] for result in results], ["first", "second", "third"])
+
     def test_embedding_api_and_forward_are_exactly_equivalent(self) -> None:
         config = foundation_config()
         model = DiagnosticModel(
@@ -92,31 +170,18 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertEqual(validated["thresholds"]["minimum_observed_cpgs"], 1500)
             self.assertEqual(validated["config"].foundation.d_model, 1536)
 
-            future = root / "future"
-            shutil.copytree(release, future)
-            provenance_path = future / "release_provenance.json"
-            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-            provenance.update(
-                {
-                    "schema_version": 8,
-                    "training_git_commit": provenance["evaluation_git_commit"],
-                    "runtime_git_commit": "a" * 40,
-                }
-            )
-            write_json(provenance_path, provenance)
-            manifest_path = future / "SHA256SUMS.json"
+            wrong_metadata = root / "wrong-metadata"
+            shutil.copytree(release, wrong_metadata)
+            metadata_path = wrong_metadata / "release.json"
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            metadata["version"] = "3.0.1"
+            write_json(metadata_path, metadata)
+            manifest_path = wrong_metadata / "SHA256SUMS.json"
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["release_provenance.json"] = sha256(provenance_path)
+            manifest["release.json"] = sha256(metadata_path)
             write_json(manifest_path, manifest)
-            with patch("alma3.release.load_dx", return_value=model):
-                self.assertEqual(validate_release(future)["provenance"]["schema_version"], 8)
-
-            provenance.pop("runtime_git_commit")
-            write_json(provenance_path, provenance)
-            manifest["release_provenance.json"] = sha256(provenance_path)
-            write_json(manifest_path, manifest)
-            with self.assertRaisesRegex(ValueError, "provenance"):
-                validate_release(future)
+            with self.assertRaisesRegex(ValueError, "metadata"):
+                validate_release(wrong_metadata)
 
             wrong_dimensions = root / "wrong-dimensions"
             shutil.copytree(release, wrong_dimensions)
@@ -196,7 +261,7 @@ class RuntimeContractTests(unittest.TestCase):
                 return original_logits(instance, embedding, *args, **kwargs)
 
             with (
-                patch("alma3.infer.validate_release", return_value=validated),
+                patch("alma3.runtime.load_release", return_value=validated),
                 patch.object(DiagnosticModel, "embed", record_embed),
                 patch.object(DiagnosticModel, "logits_from_embedding", record_logits),
             ):
@@ -241,7 +306,7 @@ class RuntimeContractTests(unittest.TestCase):
             sparse_output = root / "sparse.jsonl"
             sparse_sidecar = root / "sparse.embedding.json"
             with (
-                patch("alma3.infer.validate_release", return_value=validated),
+                patch("alma3.runtime.load_release", return_value=validated),
                 self.assertRaisesRegex(InputContractError, "below calibrated observed-CpG floor"),
             ):
                 run_inference(
@@ -269,7 +334,7 @@ class RuntimeContractTests(unittest.TestCase):
                 raise OSError("clinical publication failed")
 
             with (
-                patch("alma3.infer.validate_release", return_value=validated),
+                patch("alma3.runtime.load_release", return_value=validated),
                 patch("alma3.infer.publish_new_file", side_effect=fail_clinical_publish),
                 self.assertRaisesRegex(OSError, "clinical publication failed"),
             ):
@@ -304,7 +369,7 @@ class RuntimeContractTests(unittest.TestCase):
             sparse_output = root / "sparse.jsonl"
             sparse_sidecar = root / "sparse.embedding.json"
 
-            with patch("alma3.infer.validate_release", return_value=validated):
+            with patch("alma3.runtime.load_release", return_value=validated):
                 run_inference(
                     release,
                     complete_input,
@@ -364,7 +429,7 @@ class RuntimeContractTests(unittest.TestCase):
                 return logits
 
             with (
-                patch("alma3.infer.validate_release", return_value=validated),
+                patch("alma3.runtime.load_release", return_value=validated),
                 patch.object(DiagnosticModel, "logits_from_embedding", mutate_release),
                 self.assertRaisesRegex(ValueError, "release artifact changed during inference"),
             ):
@@ -379,7 +444,7 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(sidecar.exists())
 
-    def test_infer_cli_has_no_research_or_implicit_download_mode(self) -> None:
+    def test_infer_cli_supports_automatic_release_and_batching(self) -> None:
         arguments = [
             "--artifact",
             "release",
@@ -394,11 +459,24 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertEqual(infer_main(arguments), 0)
             run.assert_called_once_with(
                 "release",
-                "input.csv",
+                ["input.csv"],
                 "array-csv",
                 "result.jsonl",
                 device="auto",
                 embedding_sidecar=None,
+                batch_size=2,
+            )
+        automatic = [item for item in arguments if item not in {"--artifact", "release"}]
+        with patch("alma3.infer.run_inference") as run:
+            self.assertEqual(infer_main([*automatic, "--batch-size", "8", "--device", "cuda:1"]), 0)
+            run.assert_called_once_with(
+                None,
+                ["input.csv"],
+                "array-csv",
+                "result.jsonl",
+                device="cuda:1",
+                embedding_sidecar=None,
+                batch_size=8,
             )
         for removed in ("--research", "--download", "--all-probs", "--output-format"):
             with self.subTest(removed=removed), self.assertRaises(SystemExit):

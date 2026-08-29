@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://models.almagx.com/schemas/alma3-release-v1.json",
+  "title": "ALMA3 release metadata",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "version",
+    "runtime_git_commit",
+    "source_release_manifest_sha256"
+  ],
+  "properties": {
+    "kind": {"const": "alma3_release"},
+    "schema_version": {"const": 1},
+    "version": {"const": "3.0.0"},
+    "runtime_git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_release_manifest_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

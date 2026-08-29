@@ -66,12 +66,12 @@ def verify_sha256_manifest(
 
 
 def validate_new_external_outputs(
-    artifact_root: str | Path,
+    artifact_root: str | Path | None,
     outputs: Mapping[str, str | Path | None],
     *,
     inputs: Iterable[str | Path | None] = (),
 ) -> dict[str, Path]:
-    root = Path(artifact_root).resolve()
+    root = Path(artifact_root).resolve() if artifact_root is not None else None
     resolved_inputs = {Path(path).resolve() for path in inputs if path is not None}
     resolved_outputs: dict[str, Path] = {}
     seen: dict[Path, str] = {}
@@ -80,7 +80,7 @@ def validate_new_external_outputs(
             continue
         path = Path(raw_path)
         resolved = path.resolve()
-        if resolved == root or resolved.is_relative_to(root):
+        if root is not None and (resolved == root or resolved.is_relative_to(root)):
             raise ValueError(f"{name} must be outside the immutable artifact: {path}")
         if resolved in resolved_inputs:
             raise ValueError(f"{name} aliases an input file: {path}")

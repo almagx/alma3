@@ -12,3 +12,4 @@
 !src/alma3/*.py
 !src/alma3/schemas/
 !src/alma3/schemas/*.json
+!src/alma3/release_catalog.json
