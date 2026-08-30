@@ -22,6 +22,7 @@ from alma3.dx import (
     load_thresholds,
 )
 from alma3.hashes import sha256_file
+from alma3.release import RELEASE_LICENSE_HEADER
 from alma3.sitewise import CANONICAL_BASE_SEED, CANONICAL_CONDITIONS, MINIMUM_RUNTIME_INPUT_CPGS
 
 
@@ -248,7 +249,7 @@ def create_release(root: Path) -> tuple[Path, DiagnosticModel]:
         },
     )
     (root / "LICENSE").write_text(
-        "MIT License\n\nCopyright (c) 2026 ALMA Genomics\n",
+        f"{RELEASE_LICENSE_HEADER}\nSynthetic test license\n",
         encoding="utf-8",
     )
     names = (

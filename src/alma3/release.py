@@ -36,6 +36,7 @@ RELEASE_FILES = RELEASE_PAYLOADS | {"SHA256SUMS.json", "RELEASE_COMPLETE"}
 RELEASE_KIND = "alma3_release"
 RELEASE_SCHEMA_VERSION = 1
 RELEASE_VERSION = "3.0.0"
+RELEASE_LICENSE_HEADER = "ALMA3 LICENSE 1.0\n"
 RELEASE_METADATA_FIELDS = frozenset(
     {
         "kind",
@@ -188,8 +189,8 @@ def validate_release(
         license_text = (root / "LICENSE").read_text(encoding="utf-8")
     except OSError as error:
         raise DxContractError("release license is unreadable") from error
-    if not license_text.startswith("MIT License\n"):
-        raise DxContractError("release license must be MIT")
+    if not license_text.startswith(RELEASE_LICENSE_HEADER):
+        raise DxContractError("release license must be ALMA3 License 1.0")
 
     config_payload = _read_object(root / "config.json", "release model config")
     if set(config_payload) != {"foundation", "targets", "hidden_dim", "dropout"}:

@@ -440,6 +440,18 @@ class RuntimeContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "metadata"):
                 validate_release(wrong_metadata)
 
+            wrong_license = root / "wrong-license"
+            shutil.copytree(release, wrong_license)
+            license_path = wrong_license / "LICENSE"
+            license_path.write_text("MIT License\n", encoding="utf-8")
+            license_manifest = json.loads(
+                (wrong_license / "SHA256SUMS.json").read_text(encoding="utf-8")
+            )
+            license_manifest["LICENSE"] = sha256(license_path)
+            write_json(wrong_license / "SHA256SUMS.json", license_manifest)
+            with self.assertRaisesRegex(ValueError, "ALMA3 License 1.0"):
+                validate_release(wrong_license)
+
             wrong_dimensions = root / "wrong-dimensions"
             shutil.copytree(release, wrong_dimensions)
             config_path = wrong_dimensions / "config.json"

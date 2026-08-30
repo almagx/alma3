@@ -4,10 +4,16 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from alma3.release import RELEASE_LICENSE_HEADER
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class RepositoryBoundaryTests(unittest.TestCase):
+    def test_checked_in_license_matches_release_contract(self) -> None:
+        license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+        self.assertTrue(license_text.startswith(RELEASE_LICENSE_HEADER))
+
     def test_source_tree_is_inference_only(self) -> None:
         modules = {
             path.name
