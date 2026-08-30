@@ -18,10 +18,9 @@ ALMA3 is a DNA methylation foundation model. ALMA3-Dx uses its learned represent
 
 ### Key features
 
-- **Hierarchical reporting** — stops at the deepest supported classification instead of forcing a subtype.
-- **Flexible methylation inputs** — supports BedMethyl and array beta or M-value matrices.
-- **Local and cohort-ready** — runs through Python, Docker, or the command line on CPU or NVIDIA GPU.
-- **Clear outputs** — produces clinician-readable CSV and complete JSONL results.
+- **Context-aware foundation model:** learns methylation relationships across 65,536 CpGs.
+- **Coverage-aware inference:** distinguishes observed CpGs from missing sites and incorporates measurement uncertainty.
+- **Hierarchical diagnostic model:** reports the deepest supported result across tumor presence, lineage, family, type, and subtype.
 
 ## Quick start
 
@@ -36,41 +35,18 @@ Run your own sample:
 alma3 infer -i sample.bed -o sample.alma3.jsonl
 ```
 
-Use a `.csv` output name for a flat cohort table:
-
-```bash
-alma3 infer -i cohort.csv -o results.csv
-```
-
-The first run downloads and verifies the 3.9 GB model. Allow about 5 GB of disk space.
-
-For a shared or offline model installation, download it once and provide its location:
-
-```bash
-alma3 download --output /shared/alma3
-alma3 infer --artifact /shared/alma3 -i sample.bed -o sample.alma3.jsonl
-```
-
 ## Inputs
 
-| Input | Filename | Layout |
+| Input | Filename | Required preparation |
 |---|---|---|
-| BedMethyl | `.bed` or `.bed.gz` | One GRCh38 sample per file |
-| Array beta matrix | `.csv` or `.csv.gz` | Samples by row, `sample_id` first, CpG IDs as columns |
+| Array matrix | `.csv` or `.csv.gz` | One sample per row, `sample_id` first, CpG IDs as remaining columns |
+| BedMethyl | `.bed` or `.bed.gz` | One GRCh38 sample per file, tab-delimited with at least 11 columns |
 
-The format is inferred from the filename. Repeat `-i` to process multiple BedMethyl samples while loading the model once:
+- In array CSVs, CpG headers should look like `cg00000029`, not gene names. Supply beta values as decimals near `0` to `1`. Mild corrected excursions are accepted. Use `--input-values mvalue` for M-values. Leave missing measurements blank or `NaN`; do not replace them with zero or transpose the matrix.
+- For BedMethyl, column 1 is the chromosome, column 2 is the 0-based start, column 10 is coverage, and column 11 is the modified fraction from `0` to `100`.
+- Each sample must contain at least 1,500 recognized ALMA3 CpGs. Raw IDAT and BAM files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or <a href="https://nanoporetech.github.io/modkit/intro_pileup.html">modkit</a>, or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
 
-```bash
-alma3 infer -i sample-1.bed -i sample-2.bed -o cohort.alma3.jsonl
-```
-
-Blank and `NaN` array cells remain unobserved. ALMA3 accepts mild beta-value excursions around `[0,1]`, clips accepted excursions with a notice, and rejects low CpG overlap or unrelated value scales. Gene-expression matrices are not accepted.
-
-Request M-value conversion explicitly:
-
-```bash
-alma3 infer -i cohort.csv --input-values mvalue -o cohort.alma3.jsonl
-```
+The input format is inferred from the filename.
 
 ## Results
 
@@ -91,58 +67,47 @@ A partially resolved result retains the deepest resolved classification and prov
 from alma3 import ALMA3
 
 model = ALMA3()
-results = model.predict_bedmethyl(["sample-1.bed", "sample-2.bed"])
-```
-
-For an in-memory matrix:
-
-```python
-results = model.predict_array(
-    beta,
-    cpg_ids,
-    sample_ids,
-    input_values="beta",
-)
+bed_results = model.predict_bedmethyl(["sample-1.bed", "sample-2.bed"])
+array_results = model.predict_array(beta, cpg_ids, sample_ids, input_values="beta")
 ```
 
 The model loads once and preserves sample order. `device="auto"` uses CUDA when available and otherwise uses the CPU.
 
 ## Performance
 
-Use CPU for occasional samples and small cohorts. Install the official CPU-only PyTorch wheel before ALMA3:
+Use CPU with at least 16 GB RAM for occasional samples:
 
 ```bash
 pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cpu
 pip install alma3
 ```
 
-CPU inference requires no NVIDIA hardware. Provide at least 16 GB of system memory. ALMA3 stops with a direct reinstall command if an unsupported x86-64 PyTorch build is detected.
-
-Use an NVIDIA GPU for repeated inference or larger cohorts. Install the tested CUDA 12.8 PyTorch wheel before ALMA3:
+Use an NVIDIA GPU with at least 16 GB VRAM and 14 GB available for repeated inference or cohorts:
 
 ```bash
 pip install torch==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 pip install alma3
-alma3 infer -i cohort.csv -o results.csv
 ```
 
-Use a GPU with at least 16 GB of memory and start inference with at least 14 GB available. `device="auto"` uses CUDA when available. ALMA3 checks this memory before loading the model and does not switch silently to CPU after a CUDA failure. Process multiple samples in one command, or reuse one `ALMA3` Python object, so the 3.9 GB model is downloaded and loaded only once.
+The first run downloads the 3.9 GB model. Multiple samples in one command or Python object reuse the loaded model. The standalone Docker image is CPU-only.
 
-## Deployment
+## Docker
 
-Run ALMA3 locally with the Python package or the standalone CPU image:
+The standalone image includes the model and runs on CPU:
 
 ```bash
 docker run --rm -v "$PWD:/work" alma3:3.0.0 \
   infer -i /work/sample.bed -o /work/sample.alma3.jsonl
 ```
 
+## ALMAGX platform
+
 > [!TIP]
-> For diagnostic maps, integrated reports, and managed workflows, [launch ALMAGX](https://app.almagx.com/).
+> For point-and-click automatic analysis, diagnostic maps, and integrated reports, use <a href="https://app.almagx.com/">ALMAGX</a>.
 
 ## Support
 
-Questions, feedback, or deployment help? Email [support@almagx.com](mailto:support@almagx.com).
+Questions, feedback, or deployment help? Email <a href="mailto:support@almagx.com">support@almagx.com</a>.
 
 ## License
 
