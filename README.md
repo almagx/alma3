@@ -2,7 +2,7 @@
   <h1>ALMA3</h1>
   <p><strong>DNA methylation foundation and diagnostic models for hematolymphoid tumors</strong></p>
   <p>
-    <a href="LICENSE"><img alt="Research use" src="https://img.shields.io/badge/Use-Research-0891B2"></a>
+    <img alt="Research Use Only (RUO)" src="https://img.shields.io/badge/Regulatory%20status-Research%20Use%20Only%20%28RUO%29-0891B2">
     <a href="https://www.python.org/"><img alt="Python 3.10–3.12" src="https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&amp;logoColor=white"></a>
     <a href="LICENSE"><img alt="ALMA3 License 1.0" src="https://img.shields.io/badge/License-ALMA3%201.0-2563EB"></a>
   </p>
@@ -14,8 +14,8 @@ ALMA3 is a DNA methylation foundation model. ALMA3-Dx uses its learned represent
 
 ### Key features
 
-- **Large transformer:** 1,044,514,206 parameters, 36 transformer layers, 24 attention heads, and a 1,536-dimensional representation across 65,536 CpGs.
-- **Large diagnostic cohort:** fine-tuned with 97,374 supervised training samples.
+- **Billion-parameter methylation transformer:** 1,044,514,206 parameters, 36 transformer layers, 24 attention heads, and a 1,536-dimensional representation across 65,536 curated CpGs.
+- **Large-scale diagnostic training:** fine-tuned with 97,374 supervised training samples.
 - **Deep diagnostic hierarchy:** 2 tumor-presence classifications, 5 lineages, 14 families, 34 types, and 102 subtypes.
 
 ## Quick start
@@ -101,7 +101,7 @@ docker run --rm -v "$PWD:/work" alma3:3.0.0 \
 ## Point-and-click automatic analysis
 
 > [!TIP]
-> Want the complete experience without configuring Python or Docker? <a href="https://app.almagx.com/">Open ALMAGX</a> for automated preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.
+> <a href="https://app.almagx.com/">Open ALMAGX</a> for automated preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.
 
 ## Citation
 
@@ -109,7 +109,7 @@ TBD
 
 ## Support
 
-Questions, feedback, or deployment help? Email <a href="mailto:support@almagx.com">support@almagx.com</a>.
+Questions or feedback: <a href="mailto:support@almagx.com">support@almagx.com</a>.
 
 ## License
 
