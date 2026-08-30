@@ -3,18 +3,18 @@
   "kind": "alma3_release_catalog",
   "releases": [
     {
-      "base_url": "https://models.almagx.com/alma3/3.0.0/3481fbe49017c532abc4b382a89be8cd8ecfc19bbd659885da76618d6ee712b4/",
+      "base_url": "https://models.almagx.com/alma3/3.0.0/275049bea143968c1bd38563f272e3277ed4dfe9b99f31378b51b44120acb385/",
       "files": {
         "LICENSE": {
-          "sha256": "ef5e5785df26c4fc4d39d92c337ac96e9494fefb96b803c15f715147f0e222c8",
-          "size": 1070
+          "sha256": "2f036b9c94c8e9af71ff2cb979c3bf6887109d0959d7d467197eeb3e39585cb6",
+          "size": 2023
         },
         "RELEASE_COMPLETE": {
           "sha256": "37a40f08d8548dba289b9b0bb35bcf63b359f6d37ee86044ebc6b6da080b9ec1",
           "size": 9
         },
         "SHA256SUMS.json": {
-          "sha256": "3481fbe49017c532abc4b382a89be8cd8ecfc19bbd659885da76618d6ee712b4",
+          "sha256": "275049bea143968c1bd38563f272e3277ed4dfe9b99f31378b51b44120acb385",
           "size": 584
         },
         "config.json": {
@@ -30,7 +30,7 @@
           "size": 4178107400
         },
         "release.json": {
-          "sha256": "b076ac34f6e4d0f809794f8135614a3e476487fbbf258aac33f01f5af2ad5197",
+          "sha256": "2249067d779e391a1c18903d5782400af69e1baebca24f45c72b14d29899eeeb",
           "size": 226
         },
         "taxonomy.json": {
@@ -42,7 +42,7 @@
           "size": 15369
         }
       },
-      "manifest_sha256": "3481fbe49017c532abc4b382a89be8cd8ecfc19bbd659885da76618d6ee712b4",
+      "manifest_sha256": "275049bea143968c1bd38563f272e3277ed4dfe9b99f31378b51b44120acb385",
       "version": "3.0.0"
     }
   ],
