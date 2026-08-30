@@ -6,10 +6,6 @@
     <a href="https://www.python.org/"><img alt="Python 3.10–3.12" src="https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&amp;logoColor=white"></a>
     <a href="LICENSE"><img alt="ALMA3 License 1.0" src="https://img.shields.io/badge/License-ALMA3%201.0-2563EB"></a>
   </p>
-  <p>
-    <a href="https://app.almagx.com/">🚀 Launch ALMAGX</a> ·
-    <a href="mailto:support@almagx.com">✉️ Support</a>
-  </p>
 </div>
 
 ## Model introduction
@@ -18,9 +14,9 @@ ALMA3 is a DNA methylation foundation model. ALMA3-Dx uses its learned represent
 
 ### Key features
 
-- **Context-aware foundation model:** learns methylation relationships across 65,536 CpGs.
-- **Coverage-aware inference:** distinguishes observed CpGs from missing sites and incorporates measurement uncertainty.
-- **Hierarchical diagnostic model:** reports the deepest supported result across tumor presence, lineage, family, type, and subtype.
+- **Large transformer:** 1,044,514,206 parameters, 36 transformer layers, 24 attention heads, and a 1,536-dimensional representation across 65,536 CpGs.
+- **Large diagnostic cohort:** fine-tuned with 97,374 supervised training samples.
+- **Deep diagnostic hierarchy:** 2 tumor-presence classifications, 5 lineages, 14 families, 34 types, and 102 subtypes.
 
 ## Quick start
 
@@ -32,7 +28,11 @@ alma3 demo
 Run your own sample:
 
 ```bash
+# Complete JSONL
 alma3 infer -i sample.bed -o sample.alma3.jsonl
+
+# Clinician-readable CSV
+alma3 infer -i sample.bed -o sample.alma3.csv
 ```
 
 ## Inputs
@@ -45,8 +45,6 @@ alma3 infer -i sample.bed -o sample.alma3.jsonl
 - In array CSVs, CpG headers should look like `cg00000029`, not gene names. Supply beta values as decimals near `0` to `1`. Mild corrected excursions are accepted. Use `--input-values mvalue` for M-values. Leave missing measurements blank or `NaN`; do not replace them with zero or transpose the matrix.
 - For BedMethyl, column 1 is the chromosome, column 2 is the 0-based start, column 10 is coverage, and column 11 is the modified fraction from `0` to `100`.
 - Each sample must contain at least 1,500 recognized ALMA3 CpGs. Raw IDAT and BAM files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or <a href="https://nanoporetech.github.io/modkit/intro_pileup.html">modkit</a>, or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
-
-The input format is inferred from the filename.
 
 ## Results
 
@@ -100,10 +98,14 @@ docker run --rm -v "$PWD:/work" alma3:3.0.0 \
   infer -i /work/sample.bed -o /work/sample.alma3.jsonl
 ```
 
-## ALMAGX platform
+## Point-and-click automatic analysis
 
 > [!TIP]
-> For point-and-click automatic analysis, diagnostic maps, and integrated reports, use <a href="https://app.almagx.com/">ALMAGX</a>.
+> Want the complete experience without configuring Python or Docker? <a href="https://app.almagx.com/">Open ALMAGX</a> for automated preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.
+
+## Citation
+
+TBD
 
 ## Support
 
