@@ -13,7 +13,12 @@ from .release import RELEASE_VERSION
 
 RESULT_KIND = "alma3_dx_result"
 RESULT_SCHEMA_VERSION = 1
-RESULT_STATUSES = ("no_call", "tumor_not_detected", "classified", "partially_resolved")
+RESULT_STATUSES = (
+    "no_call",
+    "heme_tumor_not_detected",
+    "fully_resolved",
+    "partially_resolved",
+)
 RESULT_LEVELS = ("presence", "lineage", "family", "type", "subtype")
 TARGET_BY_LEVEL = {
     "presence": "hematolymphoid_tumor_presence",
@@ -208,7 +213,7 @@ def results_from_logits(
                     release,
                     observed_cpg_count,
                     minimum_observed_cpgs,
-                    "tumor_not_detected",
+                    "heme_tumor_not_detected",
                     path,
                     None,
                 )
@@ -259,7 +264,7 @@ def results_from_logits(
                     release,
                     observed_cpg_count,
                     minimum_observed_cpgs,
-                    "classified",
+                    "fully_resolved",
                     path,
                     None,
                 )
@@ -432,14 +437,14 @@ def validate_result(result: Any) -> None:
         raise DxContractError("no_call must report absent and present in its differential")
     if result["status"] != "no_call" and accepted is None:
         raise DxContractError("issued Dx results require an accepted node")
-    if result["status"] == "tumor_not_detected" and (
+    if result["status"] == "heme_tumor_not_detected" and (
         len(path) != 1 or path[0]["classification"] != "absent"
     ):
-        raise DxContractError("tumor_not_detected must stop after tumor presence")
-    if result["status"] in ("classified", "partially_resolved") and (
+        raise DxContractError("heme_tumor_not_detected must stop after tumor presence")
+    if result["status"] in ("fully_resolved", "partially_resolved") and (
         not path or path[0]["classification"] != PRESENT_LABEL
     ):
-        raise DxContractError("classified Dx results require an issued present tumor signal")
+        raise DxContractError("resolved Dx results require an issued present tumor signal")
 
 
 def serialize_result(result: dict[str, Any]) -> str:

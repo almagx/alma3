@@ -24,7 +24,7 @@
     "observed_cpg_count": {"type": "integer", "minimum": 1},
     "minimum_observed_cpgs": {"type": "integer", "minimum": 1},
     "status": {
-      "enum": ["no_call", "tumor_not_detected", "classified", "partially_resolved"]
+      "enum": ["no_call", "heme_tumor_not_detected", "fully_resolved", "partially_resolved"]
     },
     "accepted": {
       "oneOf": [

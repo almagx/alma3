@@ -170,12 +170,12 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
     nodes = {node["level"]: node for node in result["path"]}
     accepted_node = result["path"][-1] if result["path"] else {}
     differential = decision.get("differential", [])
-    if result["status"] == "classified":
+    if result["status"] == "fully_resolved":
         summary = (
             f"Resolved through {accepted['level']}: "
             f"{accepted['classification']}."
         )
-    elif result["status"] == "tumor_not_detected":
+    elif result["status"] == "heme_tumor_not_detected":
         summary = "No hematolymphoid tumor signal detected."
     elif result["status"] == "partially_resolved":
         summary = (

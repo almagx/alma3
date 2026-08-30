@@ -225,18 +225,18 @@ class ClinicalResultContractTests(unittest.TestCase):
                 "model_version",
             ),
         )
-        classified = _result()
+        fully_resolved = _result()
         tumor_absent = _result(tumor_absent=True)
         partially_resolved = _result(unresolved_level="subtype")
         no_call = _result(unresolved_level="presence")
 
-        classified_row = _result_csv_row(classified)
+        fully_resolved_row = _result_csv_row(fully_resolved)
         self.assertEqual(
-            classified_row["result_summary"],
+            fully_resolved_row["result_summary"],
             "Resolved through subtype: m1t1s1.",
         )
-        self.assertEqual(classified_row["resolved_basis"], "scored")
-        self.assertEqual(classified_row["differential_1_classification"], "")
+        self.assertEqual(fully_resolved_row["resolved_basis"], "scored")
+        self.assertEqual(fully_resolved_row["differential_1_classification"], "")
 
         absent_row = _result_csv_row(tumor_absent)
         self.assertEqual(absent_row["result_summary"], "No hematolymphoid tumor signal detected.")
@@ -275,7 +275,7 @@ class ClinicalResultContractTests(unittest.TestCase):
             observed_cpg_counts=[1500],
             minimum_observed_cpgs=1500,
         )[0]
-        self.assertEqual(result["status"], "classified")
+        self.assertEqual(result["status"], "fully_resolved")
         self.assertEqual(_result_csv_row(result)["resolved_basis"], "implied_by_hierarchy")
 
     def test_old_result_shape_and_invalid_differential_order_fail_closed(self) -> None:
@@ -289,6 +289,15 @@ class ClinicalResultContractTests(unittest.TestCase):
         reversed_differential["decision"]["differential"].reverse()
         with self.assertRaisesRegex(DxContractError, "ranked deterministically"):
             validate_result(reversed_differential)
+
+    def test_retired_status_names_fail_closed(self) -> None:
+        for retired_status in ("classified", "tumor_not_detected"):
+            result = _result()
+            result["status"] = retired_status
+            with self.subTest(status=retired_status), self.assertRaisesRegex(
+                DxContractError, "status is invalid"
+            ):
+                validate_result(result)
 
 
 if __name__ == "__main__":

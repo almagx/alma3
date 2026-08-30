@@ -60,8 +60,8 @@ CSV provides a clinician-readable summary. JSONL preserves the complete hierarch
 
 | Result | Meaning |
 |---|---|
-| `classified` | The applicable hierarchy was fully resolved. |
-| `tumor_not_detected` | No hematolymphoid tumor signal was detected. |
+| `fully_resolved` | The applicable hierarchy was fully resolved. |
+| `heme_tumor_not_detected` | No hematolymphoid tumor signal was detected. |
 | `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
 | `no_call` | Tumor presence did not reach its reporting cutoff. |
 
