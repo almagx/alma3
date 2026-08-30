@@ -1,7 +1,7 @@
 # ALMA3
 
 [![Python 3.10–3.12](https://img.shields.io/badge/python-3.10--3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![ALMA3 License 1.0](https://img.shields.io/badge/license-ALMA3%201.0-blue)](LICENSE)
 
 ALMA3 classifies hematolymphoid tumors from DNA methylation data. Its ALMA3-Dx model reports the deepest supported level across tumor presence, lineage, family, type, and subtype.
 
@@ -123,4 +123,4 @@ ALMAGX adds diagnostic maps, integrated reports, and production workflow automat
 
 ## License
 
-ALMA3 source and released model weights use the MIT License.
+ALMA3 source and released model weights use the ALMA3 License 1.0.

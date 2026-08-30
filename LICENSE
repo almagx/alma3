@@ -1,21 +1,63 @@
-MIT License
+ALMA3 LICENSE 1.0
 
-Copyright (c) 2026 ALMA Genomics
+Copyright (c) 2026 ALMA Genomics Inc.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This License covers the ALMA3 code, model weights, parameters, configuration,
+examples, and documentation distributed with it (the "Software").
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+"Derivative Model" means a model created by modifying, fine-tuning, quantizing,
+merging, or distilling the model weights included in the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. Permission
+
+Permission is granted, free of charge, to use, copy, modify, fine-tune, merge,
+publish, distribute, and create derivative works from the Software, subject to
+this License.
+
+2. Free Uses
+
+This License fully authorizes:
+
+- academic research;
+- education;
+- evaluation and testing;
+- noncommercial work; and
+- internal use within hospitals, laboratories, companies, and other
+  organizations.
+
+3. Attribution
+
+The copyright notice and this License must accompany copies and distributed
+derivatives.
+
+Any product or service shared with third parties that uses the Software or a
+Derivative Model must display "Powered by ALMA3" in a reasonably prominent
+location.
+
+Any report shared with third parties must state "Analysis performed using
+ALMA3."
+
+Any distributed Derivative Model must clearly state that it is based on ALMA3.
+Academic publications must acknowledge ALMA3 and cite the citation supplied
+with the Software, when available.
+
+4. Commercial Services
+
+A separate written agreement with ALMA Genomics Inc. is required to offer a
+commercial diagnostic or model service to third parties using the Software or
+a Derivative Model. This includes:
+
+- diagnostic classifications, scores, or reports;
+- hosted model access or inference;
+- model fine-tuning; and
+- a commercial product or service containing the Software or a Derivative
+  Model.
+
+Required attribution does not imply endorsement by ALMA Genomics Inc.
+
+5. Disclaimer
+
+THE SOFTWARE AND ITS OUTPUTS ARE PROVIDED "AS IS," WITHOUT EXPRESS OR IMPLIED
+WARRANTIES. TO THE MAXIMUM EXTENT PERMITTED BY LAW, ALMA GENOMICS INC. WILL NOT
+BE LIABLE FOR CLAIMS OR DAMAGES ARISING FROM THE SOFTWARE, ITS OUTPUTS, OR THEIR
+USE.
