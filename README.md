@@ -1,11 +1,9 @@
 <div align="center">
-  <h1>
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="assets/alma3-a3-signal-monogram-dark.svg">
-      <img src="assets/alma3-a3-signal-monogram-light.svg" alt="ALMA3 A3 symbol" width="64" height="64">
-    </picture>
-    ALMA3
-  </h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/alma3-a3-signal-monogram-dark.svg">
+    <img src="assets/alma3-a3-signal-monogram-light.svg" alt="ALMA3 A3 symbol" width="96" height="96">
+  </picture>
+  <h1>ALMA3</h1>
   <p><strong>Epigenomic foundation and diagnostic models for hematolymphoid tumors</strong></p>
   <p>
     <img alt="Research Use Only" src="https://img.shields.io/badge/Regulatory%20status-Research%20Use%20Only-0891B2">
