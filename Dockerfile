@@ -3,6 +3,11 @@ FROM ${PYTHON_IMAGE} AS runtime
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends procps \
+    && command -v ps >/dev/null \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml README.md LICENSE requirements.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt \
     && python -m pip install --no-cache-dir --no-deps --index-url https://download.pytorch.org/whl/cpu "torch==2.7.0" \
