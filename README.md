@@ -1,9 +1,27 @@
-# ALMA3
+<div align="center">
+  <h1>ALMA3</h1>
+  <p><strong>DNA methylation foundation and diagnostic models for hematolymphoid tumors</strong></p>
+  <p>
+    <a href="LICENSE"><img alt="Research use" src="https://img.shields.io/badge/Use-Research-0891B2"></a>
+    <a href="https://www.python.org/"><img alt="Python 3.10–3.12" src="https://img.shields.io/badge/Python-3.10--3.12-3776AB?logo=python&amp;logoColor=white"></a>
+    <a href="LICENSE"><img alt="ALMA3 License 1.0" src="https://img.shields.io/badge/License-ALMA3%201.0-2563EB"></a>
+  </p>
+  <p>
+    <a href="https://app.almagx.com/">🚀 Launch ALMAGX</a> ·
+    <a href="mailto:support@almagx.com">✉️ Support</a>
+  </p>
+</div>
 
-[![Python 3.10–3.12](https://img.shields.io/badge/python-3.10--3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![ALMA3 License 1.0](https://img.shields.io/badge/license-ALMA3%201.0-blue)](LICENSE)
+## Model introduction
 
-ALMA3 classifies hematolymphoid tumors from DNA methylation data. Its ALMA3-Dx model reports the deepest supported level across tumor presence, lineage, family, type, and subtype.
+ALMA3 is a DNA methylation foundation model. ALMA3-Dx uses its learned representation to classify hematolymphoid tumors, reporting the deepest supported conclusion from tumor presence through subtype.
+
+### Key features
+
+- **Hierarchical reporting** — stops at the deepest supported classification instead of forcing a subtype.
+- **Flexible methylation inputs** — supports BedMethyl and array beta or M-value matrices.
+- **Local and cohort-ready** — runs through Python, Docker, or the command line on CPU or NVIDIA GPU.
+- **Clear outputs** — produces clinician-readable CSV and complete JSONL results.
 
 ## Quick start
 
@@ -110,16 +128,21 @@ alma3 infer -i cohort.csv -o results.csv
 
 Use a GPU with at least 16 GB of memory and start inference with at least 14 GB available. `device="auto"` uses CUDA when available. ALMA3 checks this memory before loading the model and does not switch silently to CPU after a CUDA failure. Process multiple samples in one command, or reuse one `ALMA3` Python object, so the 3.9 GB model is downloaded and loaded only once.
 
-## Docker
+## Deployment
 
-The standalone image includes the model and runs on CPU:
+Run ALMA3 locally with the Python package or the standalone CPU image:
 
 ```bash
 docker run --rm -v "$PWD:/work" alma3:3.0.0 \
   infer -i /work/sample.bed -o /work/sample.alma3.jsonl
 ```
 
-ALMAGX adds diagnostic maps, integrated reports, and production workflow automation.
+> [!TIP]
+> For diagnostic maps, integrated reports, and managed workflows, [launch ALMAGX](https://app.almagx.com/).
+
+## Support
+
+Questions, feedback, or deployment help? Email [support@almagx.com](mailto:support@almagx.com).
 
 ## License
 
