@@ -14,7 +14,7 @@
 
 ## Model introduction
 
-ALMA3 is a DNA methylation foundation model. ALMA3-Dx uses its learned representation to classify hematolymphoid tumors, reporting the deepest supported conclusion from tumor presence through subtype.
+ALMA3 is an epigenomic foundation model. ALMA3-Dx uses its learned representation to classify hematolymphoid tumors, reporting the deepest supported conclusion from tumor presence through subtype.
 
 ### Key features
 
