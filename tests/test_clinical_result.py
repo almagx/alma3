@@ -122,6 +122,7 @@ def _result(
     unresolved_level: str | None = None,
     tumor_absent: bool = False,
     taxonomy: Taxonomy | None = None,
+    threshold: float = 0.8,
 ) -> dict[str, object]:
     taxonomy = taxonomy or _taxonomy()
     logits = _logits(taxonomy)
@@ -158,7 +159,7 @@ def _result(
     return results_from_logits(
         ["sample-1"],
         logits,
-        _thresholds(),
+        _thresholds(threshold),
         taxonomy,
         _release(),
         runtime=_runtime(),
@@ -202,11 +203,26 @@ class ClinicalResultContractTests(unittest.TestCase):
     def test_every_unresolved_level_reports_two_ranked_valid_differential_entries(self) -> None:
         taxonomy = _taxonomy()
         expected_summaries = {
-            "presence": "Tumor presence unresolved. See differential.",
-            "lineage": "Tumor detected (100.0% confidence). Lineage unresolved. See differential.",
-            "family": "Lineage: myeloid (100.0% confidence). Family unresolved. See differential.",
-            "type": "Family: m1 (100.0% confidence). Type unresolved. See differential.",
-            "subtype": "Type: m1t1 (100.0% confidence). Subtype unresolved. See differential.",
+            "presence": (
+                "Tumor presence unresolved. Leading candidate: absent "
+                "(59.9% confidence; threshold 80.0%)."
+            ),
+            "lineage": (
+                "Tumor detected (100.0% confidence). Lineage unresolved. "
+                "Leading candidate: myeloid (59.9% confidence; threshold 80.0%)."
+            ),
+            "family": (
+                "Lineage: myeloid (100.0% confidence). Family unresolved. "
+                "Leading candidate: m1 (59.9% confidence; threshold 80.0%)."
+            ),
+            "type": (
+                "Family: m1 (100.0% confidence). Type unresolved. "
+                "Leading candidate: m1t1 (59.9% confidence; threshold 80.0%)."
+            ),
+            "subtype": (
+                "Type: m1t1 (100.0% confidence). Subtype unresolved. "
+                "Leading candidate: m1t1s1 (59.9% confidence; threshold 80.0%)."
+            ),
         }
         for level_index, level in enumerate(RESULT_LEVELS):
             with self.subTest(level=level):
@@ -230,17 +246,21 @@ class ClinicalResultContractTests(unittest.TestCase):
                 self.assertNotIn("—review", result["result_summary"])
                 self.assertNotIn("\n", result["result_summary"])
                 self.assertTrue(result["result_summary"].endswith("."))
-                for entry in differential:
-                    self.assertIsNone(
-                        re.search(
-                            rf"(?<!\w){re.escape(entry['classification'])}(?!\w)",
-                            result["result_summary"],
-                        )
+                leading_matches = re.findall(
+                    rf"(?<!\w){re.escape(differential[0]['classification'])}(?!\w)",
+                    result["result_summary"],
+                )
+                self.assertEqual(len(leading_matches), 1)
+                self.assertIsNone(
+                    re.search(
+                        rf"(?<!\w){re.escape(differential[1]['classification'])}(?!\w)",
+                        result["result_summary"],
                     )
-                if level == "presence":
-                    self.assertNotIn("confidence", result["result_summary"])
-                else:
-                    self.assertIn("% confidence", result["result_summary"])
+                )
+                self.assertEqual(
+                    result["result_summary"].count("% confidence"),
+                    1 if level == "presence" else 2,
+                )
                 if level == "presence":
                     self.assertEqual(
                         [entry["classification"] for entry in differential],
@@ -281,6 +301,24 @@ class ClinicalResultContractTests(unittest.TestCase):
             [entry["index"] for entry in result["decision"]["differential"]],
             [0, 1],
         )
+        self.assertEqual(
+            result["result_summary"],
+            "Tumor presence unresolved. Leading candidate: absent "
+            "(50.0% confidence; threshold 80.0%).",
+        )
+
+    def test_unresolved_summary_rounds_candidate_confidence_and_threshold_independently(self) -> None:
+        result = _result(unresolved_level="subtype", threshold=0.81234)
+        self.assertEqual(
+            result["result_summary"],
+            "Type: m1t1 (100.0% confidence). Subtype unresolved. "
+            "Leading candidate: m1t1s1 (59.9% confidence; threshold 81.2%).",
+        )
+        self.assertAlmostEqual(
+            result["decision"]["differential"][0]["model_score"],
+            0.5986876487731934,
+        )
+        self.assertEqual(result["decision"]["reporting_cutoff"], 0.81234)
 
     def test_summary_confidence_uses_only_the_deepest_scored_class(self) -> None:
         taxonomy = _taxonomy()
@@ -394,10 +432,19 @@ class ClinicalResultContractTests(unittest.TestCase):
         unresolved_row = _result_csv_row(partially_resolved)
         self.assertEqual(
             unresolved_row["result_summary"],
-            "Type: m1t1 (100.0% confidence). Subtype unresolved. See differential.",
+            "Type: m1t1 (100.0% confidence). Subtype unresolved. "
+            "Leading candidate: m1t1s1 (59.9% confidence; threshold 80.0%).",
         )
         self.assertEqual(unresolved_row["differential_1_classification"], "m1t1s1")
         self.assertEqual(unresolved_row["differential_2_classification"], "m1t1s2")
+        self.assertEqual(
+            unresolved_row["differential_1_model_score"],
+            partially_resolved["decision"]["differential"][0]["model_score"],
+        )
+        self.assertEqual(
+            unresolved_row["unresolved_reporting_cutoff"],
+            partially_resolved["decision"]["reporting_cutoff"],
+        )
         self.assertEqual(unresolved_row["observed_cpg_count"], 2000)
         self.assertEqual(unresolved_row["minimum_observed_cpgs"], 1500)
         self.assertEqual(unresolved_row["release_version"], "3.0.0")
@@ -409,7 +456,8 @@ class ClinicalResultContractTests(unittest.TestCase):
         no_call_row = _result_csv_row(no_call)
         self.assertEqual(
             no_call_row["result_summary"],
-            "Tumor presence unresolved. See differential.",
+            "Tumor presence unresolved. Leading candidate: absent "
+            "(59.9% confidence; threshold 80.0%).",
         )
         self.assertEqual(no_call_row["resolved_classification"], "")
         self.assertEqual(no_call_row["tumor_presence"], "")
@@ -476,7 +524,8 @@ class ClinicalResultContractTests(unittest.TestCase):
         self.assertEqual(result["path"][-1]["status"], "implied")
         self.assertEqual(
             result["result_summary"],
-            "Type: myeloid_type (87.7% confidence). Subtype unresolved. See differential.",
+            "Type: myeloid_type (87.7% confidence). Subtype unresolved. "
+            "Leading candidate: myeloid_subtype_1 (50.0% confidence; threshold 80.0%).",
         )
         row = _result_csv_row(result)
         self.assertEqual(row["resolved_basis"], "implied_by_hierarchy")
@@ -495,10 +544,23 @@ class ClinicalResultContractTests(unittest.TestCase):
         with self.assertRaisesRegex(DxContractError, "ranked deterministically"):
             validate_result(reversed_differential)
 
-        tampered_summary = copy.deepcopy(result)
-        tampered_summary["result_summary"] = "Subtype unresolved."
-        with self.assertRaisesRegex(DxContractError, "summary is invalid"):
-            validate_result(tampered_summary)
+        canonical_summary = result["result_summary"]
+        tampered_summaries = {
+            "wrong candidate": canonical_summary.replace("m1t1s1", "m1t1s2"),
+            "wrong candidate score": canonical_summary.replace("59.9% confidence", "59.8% confidence"),
+            "wrong threshold": canonical_summary.replace("threshold 80.0%", "threshold 79.9%"),
+            "legacy prose": "Type: m1t1 (100.0% confidence). Subtype unresolved. See differential.",
+            "altered ordering": (
+                "Leading candidate: m1t1s1 (59.9% confidence; threshold 80.0%). "
+                "Type: m1t1 (100.0% confidence). Subtype unresolved."
+            ),
+        }
+        for description, summary in tampered_summaries.items():
+            with self.subTest(description=description):
+                tampered_summary = copy.deepcopy(result)
+                tampered_summary["result_summary"] = summary
+                with self.assertRaisesRegex(DxContractError, "summary is invalid"):
+                    validate_result(tampered_summary)
 
         schema_v1 = copy.deepcopy(result)
         schema_v1["schema_version"] = 1

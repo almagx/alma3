@@ -70,8 +70,17 @@ def validate_sample_id(value: Any) -> str:
 
 def _result_summary(result: dict[str, Any]) -> str:
     status = result["status"]
+    leading_candidate = None
+    if status in ("no_call", "partially_resolved"):
+        decision = result["decision"]
+        candidate = decision["differential"][0]
+        leading_candidate = (
+            f"Leading candidate: {candidate['classification']} "
+            f"({float(candidate['model_score']) * 100.0:.1f}% confidence; "
+            f"threshold {float(decision['reporting_cutoff']) * 100.0:.1f}%)."
+        )
     if status == "no_call":
-        return "Tumor presence unresolved. See differential."
+        return f"Tumor presence unresolved. {leading_candidate}"
 
     accepted = result["accepted"]
     scored_node = next(node for node in reversed(result["path"]) if node["status"] == "resolved")
@@ -87,7 +96,7 @@ def _result_summary(result: dict[str, Any]) -> str:
         summary = f"{level}: {accepted['classification']} ({evidence})."
     if status == "partially_resolved":
         unresolved = _LEVEL_DISPLAY[result["decision"]["level"]].capitalize()
-        return f"{summary} {unresolved} unresolved. See differential."
+        return f"{summary} {unresolved} unresolved. {leading_candidate}"
     return summary
 
 
