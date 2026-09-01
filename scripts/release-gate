@@ -208,6 +208,7 @@ def main() -> int:
 
         if args.release_artifact is not None:
             release = args.release_artifact.resolve()
+            output_user = f"{os.getuid()}:{os.getgid()}"
             inspect_release_catalog(release)
             inspect_demo(release)
             run(
@@ -247,7 +248,7 @@ def main() -> int:
                     "run",
                     "--rm",
                     "--user",
-                    "0:0",
+                    output_user,
                     "-v",
                     f"{raw}:/out",
                     "alma3:3.0.0-rc",
@@ -262,7 +263,7 @@ def main() -> int:
                     "run",
                     "--rm",
                     "--user",
-                    "0:0",
+                    output_user,
                     "-v",
                     f"{raw}:/out",
                     "alma3:3.0.0-rc",
