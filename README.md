@@ -145,3 +145,5 @@ Questions or feedback: <a href="mailto:support@almagx.com">support@almagx.com</a
 ## License
 
 ALMA3 source and released model weights use the ALMA3 License 1.0.
+
+ALMA3 models are free to explore and use for research, education, and other noncommercial or internal projects.
