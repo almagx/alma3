@@ -62,11 +62,11 @@ JSONL schema v2 is the canonical result. CSV is its fixed clinician-readable pro
 | `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
 | `no_call` | Tumor presence did not reach its reporting cutoff. |
 
-Every result includes a concise `result_summary`. When the deepest accepted class was directly scored, the summary displays `100 × model_score` to one decimal place as confidence. Hierarchy-implied classes omit confidence because they have no class-specific model score. A partially resolved or no-call result uses a separate sentence to direct the reader to its two-class informational differential.
+Every result includes a concise `result_summary`. Calls display the deepest accepted class and `100 × model_score` from the deepest scored accepted path node to one decimal place as confidence. For a hierarchy-implied class, that confidence carries forward from its deepest scored ancestor; `resolved_basis` and the path status identify the implication, while the implied class's structured score remains null in JSONL and blank in CSV. A partially resolved or no-call result ends with `See differential.`
 
 Model scores rank classifications within the applicable parent-conditioned branch. They are not individual patient probabilities, positive predictive values, or standalone measures of diagnostic certainty. Raw scores remain unrounded in JSONL and CSV.
 
-CSV level groups contain classification, status, model score, and reporting cutoff. Scored levels populate all four fields; hierarchy-implied levels have blank score and cutoff fields; unreached levels are entirely blank. Unresolved decision fields are populated only for `partially_resolved` and `no_call` results.
+The fixed 44-column CSV is ordered for human review: primary result, unresolved differential, CpG/input context, hierarchy evidence, then contract and runtime provenance. Each hierarchy level contains classification, status, model score, and reporting cutoff. Scored levels populate all four fields; hierarchy-implied levels have blank score and cutoff fields; unreached levels are entirely blank. Unresolved decision fields are populated only for `partially_resolved` and `no_call` results.
 
 For troubleshooting, send the original generated CSV without opening and resaving it in spreadsheet software, which can alter identifiers or numeric precision.
 

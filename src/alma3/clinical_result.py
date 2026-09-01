@@ -40,7 +40,7 @@ _RELEASE_FIELDS = {"version", *_RELEASE_HASH_FIELDS}
 _RUNTIME_FIELDS = {"package_version", "contract_sha256", "device"}
 _INPUT_FIELDS = {"format", "value_mode", "clipped_value_count"}
 _LEVEL_DISPLAY = {
-    "presence": "hematolymphoid tumor presence",
+    "presence": "tumor presence",
     "lineage": "lineage",
     "family": "family",
     "type": "type",
@@ -71,32 +71,24 @@ def validate_sample_id(value: Any) -> str:
 def _result_summary(result: dict[str, Any]) -> str:
     status = result["status"]
     if status == "no_call":
-        return (
-            "No call: hematolymphoid tumor presence unresolved. Review the two leading "
-            "possibilities in the differential."
-        )
+        return "Tumor presence unresolved. See differential."
 
     accepted = result["accepted"]
-    accepted_node = result["path"][-1]
-    confidence = (
-        f" ({float(accepted_node['model_score']) * 100.0:.1f}% confidence)"
-        if accepted_node["status"] == "resolved"
-        else ""
-    )
+    scored_node = next(node for node in reversed(result["path"]) if node["status"] == "resolved")
+    scored_confidence = float(scored_node["model_score"]) * 100.0
     if status == "heme_tumor_not_detected":
-        return f"No hematolymphoid tumor signal detected{confidence}."
+        return f"Tumor not detected ({scored_confidence:.1f}% confidence)."
 
-    resolved = (
-        f"Resolved through {_LEVEL_DISPLAY[accepted['level']]}: "
-        f"{accepted['classification']}{confidence}"
-    )
+    evidence = f"{scored_confidence:.1f}% confidence"
+    if accepted["level"] == "presence":
+        summary = f"Tumor detected ({evidence})."
+    else:
+        level = _LEVEL_DISPLAY[accepted["level"]].capitalize()
+        summary = f"{level}: {accepted['classification']} ({evidence})."
     if status == "partially_resolved":
-        unresolved = _LEVEL_DISPLAY[result["decision"]["level"]]
-        return (
-            f"{resolved}; {unresolved} unresolved. Review the two leading possibilities "
-            "in the differential."
-        )
-    return f"{resolved}."
+        unresolved = _LEVEL_DISPLAY[result["decision"]["level"]].capitalize()
+        return f"{summary} {unresolved} unresolved. See differential."
+    return summary
 
 
 def _rank_candidates(

@@ -201,6 +201,13 @@ class ClinicalResultContractTests(unittest.TestCase):
 
     def test_every_unresolved_level_reports_two_ranked_valid_differential_entries(self) -> None:
         taxonomy = _taxonomy()
+        expected_summaries = {
+            "presence": "Tumor presence unresolved. See differential.",
+            "lineage": "Tumor detected (100.0% confidence). Lineage unresolved. See differential.",
+            "family": "Lineage: myeloid (100.0% confidence). Family unresolved. See differential.",
+            "type": "Family: m1 (100.0% confidence). Type unresolved. See differential.",
+            "subtype": "Type: m1t1 (100.0% confidence). Subtype unresolved. See differential.",
+        }
         for level_index, level in enumerate(RESULT_LEVELS):
             with self.subTest(level=level):
                 result = _result(unresolved_level=level, taxonomy=taxonomy)
@@ -219,10 +226,7 @@ class ClinicalResultContractTests(unittest.TestCase):
                     differential[0]["model_score"],
                     result["decision"]["reporting_cutoff"],
                 )
-                self.assertIn(
-                    "Review the two leading possibilities in the differential.",
-                    result["result_summary"],
-                )
+                self.assertEqual(result["result_summary"], expected_summaries[level])
                 self.assertNotIn("—review", result["result_summary"])
                 self.assertNotIn("\n", result["result_summary"])
                 self.assertTrue(result["result_summary"].endswith("."))
@@ -306,7 +310,7 @@ class ClinicalResultContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "fully_resolved")
         self.assertEqual(
             result["result_summary"],
-            "Resolved through subtype: m1t1s1 (91.2% confidence).",
+            "Subtype: m1t1s1 (91.2% confidence).",
         )
         self.assertAlmostEqual(result["path"][-1]["model_score"], 0.91234, places=5)
         self.assertNotIn("99.0%", result["result_summary"])
@@ -318,21 +322,20 @@ class ClinicalResultContractTests(unittest.TestCase):
                 "sample_id",
                 "result_summary",
                 "result_status",
-                "result_kind",
-                "result_schema_version",
-                "release_version",
-                "release_manifest_sha256",
-                "runtime_package_version",
-                "runtime_contract_sha256",
-                "inference_device",
-                "input_format",
-                "input_value_mode",
-                "input_clipped_value_count",
-                "observed_cpg_count",
-                "minimum_observed_cpgs",
                 "resolved_level",
                 "resolved_classification",
                 "resolved_basis",
+                "unresolved_level",
+                "unresolved_reporting_cutoff",
+                "differential_1_classification",
+                "differential_1_model_score",
+                "differential_2_classification",
+                "differential_2_model_score",
+                "observed_cpg_count",
+                "minimum_observed_cpgs",
+                "input_format",
+                "input_value_mode",
+                "input_clipped_value_count",
                 "tumor_presence",
                 "tumor_presence_status",
                 "tumor_presence_model_score",
@@ -353,12 +356,13 @@ class ClinicalResultContractTests(unittest.TestCase):
                 "subtype_status",
                 "subtype_model_score",
                 "subtype_reporting_cutoff",
-                "unresolved_level",
-                "unresolved_reporting_cutoff",
-                "differential_1_classification",
-                "differential_1_model_score",
-                "differential_2_classification",
-                "differential_2_model_score",
+                "result_kind",
+                "result_schema_version",
+                "release_version",
+                "release_manifest_sha256",
+                "runtime_package_version",
+                "runtime_contract_sha256",
+                "inference_device",
             ),
         )
         self.assertEqual(len(_RESULT_CSV_FIELDS), 44)
@@ -370,7 +374,7 @@ class ClinicalResultContractTests(unittest.TestCase):
         fully_resolved_row = _result_csv_row(fully_resolved)
         self.assertEqual(
             fully_resolved_row["result_summary"],
-            "Resolved through subtype: m1t1s1 (100.0% confidence).",
+            "Subtype: m1t1s1 (100.0% confidence).",
         )
         self.assertEqual(fully_resolved["result_summary"], fully_resolved_row["result_summary"])
         self.assertEqual(fully_resolved_row["resolved_basis"], "scored")
@@ -382,7 +386,7 @@ class ClinicalResultContractTests(unittest.TestCase):
         absent_row = _result_csv_row(tumor_absent)
         self.assertEqual(
             absent_row["result_summary"],
-            "No hematolymphoid tumor signal detected (100.0% confidence).",
+            "Tumor not detected (100.0% confidence).",
         )
         self.assertEqual(absent_row["resolved_classification"], "absent")
         self.assertEqual(absent_row["lineage"], "")
@@ -390,8 +394,7 @@ class ClinicalResultContractTests(unittest.TestCase):
         unresolved_row = _result_csv_row(partially_resolved)
         self.assertEqual(
             unresolved_row["result_summary"],
-            "Resolved through type: m1t1 (100.0% confidence); subtype unresolved. Review "
-            "the two leading possibilities in the differential.",
+            "Type: m1t1 (100.0% confidence). Subtype unresolved. See differential.",
         )
         self.assertEqual(unresolved_row["differential_1_classification"], "m1t1s1")
         self.assertEqual(unresolved_row["differential_2_classification"], "m1t1s2")
@@ -406,8 +409,7 @@ class ClinicalResultContractTests(unittest.TestCase):
         no_call_row = _result_csv_row(no_call)
         self.assertEqual(
             no_call_row["result_summary"],
-            "No call: hematolymphoid tumor presence unresolved. Review the two leading "
-            "possibilities in the differential.",
+            "Tumor presence unresolved. See differential.",
         )
         self.assertEqual(no_call_row["resolved_classification"], "")
         self.assertEqual(no_call_row["tumor_presence"], "")
@@ -433,13 +435,15 @@ class ClinicalResultContractTests(unittest.TestCase):
         self.assertEqual(result["status"], "fully_resolved")
         row = _result_csv_row(result)
         self.assertEqual(row["resolved_basis"], "implied_by_hierarchy")
-        self.assertEqual(result["result_summary"], "Resolved through subtype: myeloid_subtype.")
-        self.assertNotIn("confidence", result["result_summary"])
+        self.assertEqual(
+            result["result_summary"],
+            "Subtype: myeloid_subtype (100.0% confidence).",
+        )
         self.assertEqual(row["subtype_status"], "implied")
         self.assertEqual(row["subtype_model_score"], "")
         self.assertEqual(row["subtype_reporting_cutoff"], "")
 
-    def test_implied_partial_summary_omits_ancestor_confidence(self) -> None:
+    def test_implied_partial_summary_reports_deepest_scored_ancestor_confidence(self) -> None:
         payload = taxonomy_payload()
         payload["levels"]["subtype"] = [
             "myeloid_subtype_1",
@@ -453,7 +457,9 @@ class ClinicalResultContractTests(unittest.TestCase):
         taxonomy = Taxonomy.from_dict(payload)
         logits = _logits(taxonomy)
         _select(logits, "hematolymphoid_tumor_presence", 1)
-        _select(logits, "lineage", 0)
+        lineage_score = 0.87654
+        logits["lineage"].zero_()
+        logits["lineage"][0, 0] = math.log(lineage_score / (1.0 - lineage_score))
         result = results_from_logits(
             ["sample-1"],
             logits,
@@ -470,10 +476,8 @@ class ClinicalResultContractTests(unittest.TestCase):
         self.assertEqual(result["path"][-1]["status"], "implied")
         self.assertEqual(
             result["result_summary"],
-            "Resolved through type: myeloid_type; subtype unresolved. Review the two "
-            "leading possibilities in the differential.",
+            "Type: myeloid_type (87.7% confidence). Subtype unresolved. See differential.",
         )
-        self.assertNotIn("confidence", result["result_summary"])
         row = _result_csv_row(result)
         self.assertEqual(row["resolved_basis"], "implied_by_hierarchy")
         self.assertEqual(row["type_model_score"], "")
