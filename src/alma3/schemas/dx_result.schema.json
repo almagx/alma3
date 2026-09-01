@@ -104,6 +104,7 @@
       "properties": {
         "format": {"enum": ["array", "array-csv", "bedmethyl"]},
         "value_mode": {"enum": ["beta", "mvalue", "fraction_modified"]},
+        "modification_mode": {"enum": ["5mc", "5mc_plus_5hmc"]},
         "clipped_value_count": {"type": "integer", "minimum": 0}
       },
       "oneOf": [
@@ -111,21 +112,24 @@
           "properties": {
             "format": {"enum": ["array", "array-csv"]},
             "value_mode": {"const": "beta"}
-          }
+          },
+          "not": {"required": ["modification_mode"]}
         },
         {
           "properties": {
             "format": {"enum": ["array", "array-csv"]},
             "value_mode": {"const": "mvalue"},
             "clipped_value_count": {"const": 0}
-          }
+          },
+          "not": {"required": ["modification_mode"]}
         },
         {
           "properties": {
             "format": {"const": "bedmethyl"},
             "value_mode": {"const": "fraction_modified"},
             "clipped_value_count": {"const": 0}
-          }
+          },
+          "required": ["modification_mode"]
         }
       ]
     },

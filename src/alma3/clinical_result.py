@@ -21,6 +21,7 @@ RESULT_STATUSES = (
     "partially_resolved",
 )
 RESULT_LEVELS = ("presence", "lineage", "family", "type", "subtype")
+BEDMETHYL_MODIFICATION_MODES = ("5mc", "5mc_plus_5hmc")
 TARGET_BY_LEVEL = {
     "presence": "hematolymphoid_tumor_presence",
     "lineage": "lineage",
@@ -379,9 +380,16 @@ def _validate_runtime(runtime: Any) -> None:
 
 
 def _validate_input(metadata: Any, observed_cpg_count: int) -> None:
-    if not isinstance(metadata, dict) or set(metadata) != _INPUT_FIELDS:
+    if not isinstance(metadata, dict) or "format" not in metadata:
         raise DxContractError("result input fields are invalid")
     input_format = metadata["format"]
+    expected_fields = (
+        {*_INPUT_FIELDS, "modification_mode"}
+        if input_format == "bedmethyl"
+        else _INPUT_FIELDS
+    )
+    if set(metadata) != expected_fields:
+        raise DxContractError("result input fields are invalid")
     value_mode = metadata["value_mode"]
     clipped = metadata["clipped_value_count"]
     if not isinstance(input_format, str) or input_format not in {
@@ -393,8 +401,11 @@ def _validate_input(metadata: Any, observed_cpg_count: int) -> None:
     if input_format in {"array", "array-csv"}:
         if not isinstance(value_mode, str) or value_mode not in {"beta", "mvalue"}:
             raise DxContractError("result array input value mode is invalid")
-    elif value_mode != "fraction_modified":
-        raise DxContractError("result bedMethyl input value mode is invalid")
+    else:
+        if value_mode != "fraction_modified":
+            raise DxContractError("result bedMethyl input value mode is invalid")
+        if metadata["modification_mode"] not in BEDMETHYL_MODIFICATION_MODES:
+            raise DxContractError("result bedMethyl modification mode is invalid")
     if type(clipped) is not int or clipped < 0 or clipped > observed_cpg_count:
         raise DxContractError("result input clipped value count is invalid")
     if (input_format == "bedmethyl" or value_mode == "mvalue") and clipped != 0:

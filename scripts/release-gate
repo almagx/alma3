@@ -68,7 +68,7 @@ def inspect_paired_results(jsonl: Path, csv_path: Path) -> None:
         reader = csv.DictReader(handle)
         csv_rows = list(reader)
     if tuple(reader.fieldnames or ()) != _RESULT_CSV_FIELDS:
-        raise RuntimeError("paired demo CSV header does not match the 44-column contract")
+        raise RuntimeError("paired demo CSV header does not match the 45-column contract")
     if not json_rows or len(json_rows) != len(csv_rows):
         raise RuntimeError("paired demo outputs are empty or have different row counts")
     for row in json_rows:

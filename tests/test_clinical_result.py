@@ -92,11 +92,14 @@ def _runtime() -> dict[str, str]:
 
 
 def _input(*, clipped: int = 0, input_format: str = "array") -> dict[str, object]:
-    return {
+    value = {
         "format": input_format,
         "value_mode": "fraction_modified" if input_format == "bedmethyl" else "beta",
         "clipped_value_count": clipped,
     }
+    if input_format == "bedmethyl":
+        value["modification_mode"] = "5mc_plus_5hmc"
+    return value
 
 
 def _thresholds(value: float = 0.8) -> dict[str, object]:
@@ -198,6 +201,10 @@ class ClinicalResultContractTests(unittest.TestCase):
         self.assertEqual(
             set(schema["$defs"]["input"]["required"]),
             {"format", "value_mode", "clipped_value_count"},
+        )
+        self.assertEqual(
+            schema["$defs"]["input"]["properties"]["modification_mode"]["enum"],
+            ["5mc", "5mc_plus_5hmc"],
         )
 
     def test_every_unresolved_level_reports_two_ranked_valid_differential_entries(self) -> None:
@@ -373,6 +380,7 @@ class ClinicalResultContractTests(unittest.TestCase):
                 "minimum_observed_cpgs",
                 "input_format",
                 "input_value_mode",
+                "input_modification_mode",
                 "input_clipped_value_count",
                 "tumor_presence",
                 "tumor_presence_status",
@@ -403,7 +411,7 @@ class ClinicalResultContractTests(unittest.TestCase):
                 "inference_device",
             ),
         )
-        self.assertEqual(len(_RESULT_CSV_FIELDS), 44)
+        self.assertEqual(len(_RESULT_CSV_FIELDS), 45)
         fully_resolved = _result()
         tumor_absent = _result(tumor_absent=True)
         partially_resolved = _result(unresolved_level="subtype")
@@ -417,9 +425,17 @@ class ClinicalResultContractTests(unittest.TestCase):
         self.assertEqual(fully_resolved["result_summary"], fully_resolved_row["result_summary"])
         self.assertEqual(fully_resolved_row["resolved_basis"], "scored")
         self.assertEqual(fully_resolved_row["result_schema_version"], RESULT_SCHEMA_VERSION)
+        self.assertEqual(fully_resolved_row["input_modification_mode"], "")
         self.assertEqual(fully_resolved_row["subtype_status"], "resolved")
         self.assertNotEqual(fully_resolved_row["subtype_model_score"], "")
         self.assertEqual(fully_resolved_row["differential_1_classification"], "")
+
+        bedmethyl = copy.deepcopy(fully_resolved)
+        bedmethyl["input"] = _input(input_format="bedmethyl")
+        self.assertEqual(
+            _result_csv_row(bedmethyl)["input_modification_mode"],
+            "5mc_plus_5hmc",
+        )
 
         absent_row = _result_csv_row(tumor_absent)
         self.assertEqual(
@@ -587,6 +603,26 @@ class ClinicalResultContractTests(unittest.TestCase):
                 mutate(candidate)
                 with self.assertRaises(DxContractError):
                     validate_result(candidate)
+
+        bedmethyl = _result()
+        bedmethyl["input"] = _input(input_format="bedmethyl")
+        validate_result(bedmethyl)
+        for name, mutate in {
+            "missing mode": lambda value: value["input"].pop("modification_mode"),
+            "invalid mode": lambda value: value["input"].__setitem__(
+                "modification_mode", "unknown"
+            ),
+        }.items():
+            with self.subTest(name=name):
+                candidate = copy.deepcopy(bedmethyl)
+                mutate(candidate)
+                with self.assertRaises(DxContractError):
+                    validate_result(candidate)
+
+        array_with_mode = _result()
+        array_with_mode["input"]["modification_mode"] = "5mc_plus_5hmc"
+        with self.assertRaises(DxContractError):
+            validate_result(array_with_mode)
 
         for sample_id in ("", " sample", "sample ", "sample\nname", "=formula", "+sum", "-1", "@cmd"):
             with self.subTest(sample_id=sample_id):

@@ -33,10 +33,10 @@ Run your own sample:
 
 ```bash
 # Complete JSONL
-alma3 infer -i sample.bed -o sample.alma3.jsonl
+alma3 infer -i sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc -o sample.alma3.jsonl
 
 # Clinician-readable CSV
-alma3 infer -i sample.bed -o sample.alma3.csv
+alma3 infer -i sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc -o sample.alma3.csv
 ```
 
 ## Inputs
@@ -47,9 +47,23 @@ alma3 infer -i sample.bed -o sample.alma3.csv
 | BedMethyl | `.bed` or `.bed.gz` | One GRCh38 sample per file, tab-delimited with at least 11 columns |
 
 - In array CSVs, CpG headers should look like `cg00000029`, not gene names. Supply beta values as decimals near `0` to `1`. Mild corrected excursions are accepted. Use `--input-values mvalue` for M-values. Leave missing measurements blank or `NaN`; do not replace them with zero or transpose the matrix.
-- For BedMethyl, column 1 is the chromosome, column 2 is the 0-based start, column 10 is coverage, and column 11 is the modified fraction from `0` to `100`.
+- For BedMethyl, column 1 is the chromosome, column 2 is the 0-based start, column 10 is coverage, and column 11 is the modified fraction from `0` to `100`. Every BedMethyl inference must declare `--bedmethyl-modification-mode 5mc_plus_5hmc` or `5mc`; ALMA3 records the declaration because BedMethyl itself cannot prove which upstream modifications were aggregated.
 - Each sample must contain at least 1,500 recognized ALMA3 CpGs. Raw IDAT and BAM files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or <a href="https://nanoporetech.github.io/modkit/intro_pileup.html">modkit</a>, or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
 - Sample IDs must be nonempty and unique, with no surrounding whitespace, ASCII control characters, or leading `=`, `+`, `-`, or `@`.
+
+Standard Infinium bisulfite chemistry does not distinguish 5mC from 5hmC. Prepare array-comparable ONT input with pinned Modkit `v0.6.3` and one combined row per CpG:
+
+```bash
+modkit pileup input.bam output.bed \
+  --modified-bases 5mC 5hmC \
+  --combine-mods \
+  --cpg \
+  --combine-strands \
+  --no-filtering \
+  --ref GRCh38.fa
+```
+
+Use `5mc` only for an explicitly 5mC-only BedMethyl projection, including the supported PacBio route. The mode is required and has no fallback.
 
 ## Results
 
@@ -66,7 +80,7 @@ Every result includes a concise `result_summary`. Calls display the deepest acce
 
 Confidence is `100 ×` the parent-conditioned model score for either an accepted call or the displayed leading candidate. The leading candidate remains unresolved because its confidence is below the displayed threshold. Confidence is not an individual patient probability, positive predictive value, or standalone measure of diagnostic certainty. Raw scores and reporting cutoffs remain unrounded in JSONL and CSV; the summary alone uses the shorter word `threshold` and rounds displayed percentages to one decimal place.
 
-The fixed 44-column CSV is ordered for human review: primary result, unresolved differential, CpG/input context, hierarchy evidence, then contract and runtime provenance. Each hierarchy level contains classification, status, model score, and reporting cutoff. Scored levels populate all four fields; hierarchy-implied levels have blank score and cutoff fields; unreached levels are entirely blank. Unresolved decision fields are populated only for `partially_resolved` and `no_call` results.
+The fixed 45-column CSV is ordered for human review: primary result, unresolved differential, CpG/input context, hierarchy evidence, then contract and runtime provenance. BedMethyl rows record `input_modification_mode`; array rows leave it blank. Each hierarchy level contains classification, status, model score, and reporting cutoff. Scored levels populate all four fields; hierarchy-implied levels have blank score and cutoff fields; unreached levels are entirely blank. Unresolved decision fields are populated only for `partially_resolved` and `no_call` results.
 
 For troubleshooting, send the original generated CSV without opening and resaving it in spreadsheet software, which can alter identifiers or numeric precision.
 
@@ -76,7 +90,10 @@ For troubleshooting, send the original generated CSV without opening and resavin
 from alma3 import ALMA3
 
 model = ALMA3()
-bed_results = model.predict_bedmethyl(["sample-1.bed", "sample-2.bed"])
+bed_results = model.predict_bedmethyl(
+    ["sample-1.bed", "sample-2.bed"],
+    modification_mode="5mc_plus_5hmc",
+)
 array_results = model.predict_array(beta, cpg_ids, sample_ids, input_values="beta")
 ```
 

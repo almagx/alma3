@@ -14,7 +14,12 @@ from typing import Any
 
 import torch
 
-from .clinical_result import serialize_result, validate_result, validate_sample_id
+from .clinical_result import (
+    BEDMETHYL_MODIFICATION_MODES,
+    serialize_result,
+    validate_result,
+    validate_sample_id,
+)
 from .data import CpGManifest
 from .dx import (
     DX_REPRESENTATION_DIMENSIONS,
@@ -58,6 +63,7 @@ _RESULT_CSV_FIELDS = (
     "minimum_observed_cpgs",
     "input_format",
     "input_value_mode",
+    "input_modification_mode",
     "input_clipped_value_count",
     "tumor_presence",
     "tumor_presence_status",
@@ -213,6 +219,7 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
         "inference_device": result["runtime"]["device"],
         "input_format": result["input"]["format"],
         "input_value_mode": result["input"]["value_mode"],
+        "input_modification_mode": result["input"].get("modification_mode", ""),
         "input_clipped_value_count": result["input"]["clipped_value_count"],
         "observed_cpg_count": result["observed_cpg_count"],
         "minimum_observed_cpgs": result["minimum_observed_cpgs"],
@@ -383,8 +390,16 @@ def load_array_csv(
 
 
 def load_bed_methyl_with_manifest(
-    path: str | Path, cpg: CpGManifest, sample_id: str | None = None
+    path: str | Path,
+    cpg: CpGManifest,
+    sample_id: str | None = None,
+    *,
+    modification_mode: str,
 ) -> tuple[list[str], torch.Tensor, torch.Tensor, torch.Tensor]:
+    if modification_mode not in BEDMETHYL_MODIFICATION_MODES:
+        raise InputContractError(
+            "bedMethyl modification_mode must be 5mc or 5mc_plus_5hmc"
+        )
     input_path = Path(path)
     if cpg.chrom is None or cpg.start is None:
         raise InputContractError("bedMethyl inference requires chrom and genomic start in CpG manifest")
@@ -482,6 +497,7 @@ def _bedmethyl_batches(
     cpg: CpGManifest,
     *,
     batch_size: int,
+    modification_mode: str,
 ) -> Iterator[tuple[list[str], torch.Tensor, torch.Tensor, torch.Tensor]]:
     sample_ids: list[str] = []
     beta_rows: list[torch.Tensor] = []
@@ -489,7 +505,11 @@ def _bedmethyl_batches(
     uncertainty_rows: list[torch.Tensor] = []
     seen: set[str] = set()
     for path in paths:
-        ids, beta, observed, coverage = load_bed_methyl_with_manifest(path, cpg)
+        ids, beta, observed, coverage = load_bed_methyl_with_manifest(
+            path,
+            cpg,
+            modification_mode=modification_mode,
+        )
         sample_id = ids[0]
         if sample_id in seen:
             raise InputContractError(f"duplicate BedMethyl sample ID: {sample_id}")
@@ -526,6 +546,7 @@ def run_inference(
     embedding_sidecar: str | Path | None = None,
     batch_size: int = DEFAULT_INFERENCE_BATCH_SIZE,
     input_values: str = "beta",
+    bedmethyl_modification_mode: str | None = None,
     progress: bool = False,
 ) -> Path:
     if type(batch_size) is not int or batch_size <= 0:
@@ -542,6 +563,15 @@ def run_inference(
         raise InputContractError("input_values must be beta or mvalue")
     if input_format != "array-csv" and input_values != "beta":
         raise InputContractError("--input-values applies only to array-csv input")
+    if input_format == "bedmethyl":
+        if bedmethyl_modification_mode not in BEDMETHYL_MODIFICATION_MODES:
+            raise InputContractError(
+                "--bedmethyl-modification-mode is required for bedmethyl input"
+            )
+    elif bedmethyl_modification_mode is not None:
+        raise InputContractError(
+            "--bedmethyl-modification-mode applies only to bedmethyl input"
+        )
     validate_new_external_outputs(
         None,
         {"inference output": output, "embedding sidecar": embedding_sidecar},
@@ -571,7 +601,12 @@ def run_inference(
     else:
         batches = (
             (*batch, _ArrayValueSummary(0, 0, (0,) * len(batch[0])))
-            for batch in _bedmethyl_batches(inputs, runtime.cpg, batch_size=batch_size)
+            for batch in _bedmethyl_batches(
+                inputs,
+                runtime.cpg,
+                batch_size=batch_size,
+                modification_mode=bedmethyl_modification_mode,
+            )
         )
     minimum_observed = runtime.minimum_observed_cpgs
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -591,16 +626,18 @@ def run_inference(
             for sample_ids, x, observed, uncertainty, adjustment in batches:
                 adjustment_observed += adjustment.observed
                 adjustment_clipped += adjustment.clipped
-                input_metadata = [
-                    {
+                input_metadata = []
+                for clipped in adjustment.clipped_by_sample:
+                    metadata = {
                         "format": input_format,
                         "value_mode": (
                             input_values if input_format == "array-csv" else "fraction_modified"
                         ),
                         "clipped_value_count": clipped,
                     }
-                    for clipped in adjustment.clipped_by_sample
-                ]
+                    if input_format == "bedmethyl":
+                        metadata["modification_mode"] = bedmethyl_modification_mode
+                    input_metadata.append(metadata)
                 clinical_results, embedding, observed_counts = runtime._predict_tensors(
                     sample_ids,
                     x,
@@ -718,6 +755,11 @@ def main(argv: list[str] | None = None) -> int:
         help="array values supplied as beta values or explicit M-values",
     )
     parser.add_argument(
+        "--bedmethyl-modification-mode",
+        choices=BEDMETHYL_MODIFICATION_MODES,
+        help="required BedMethyl projection: 5mc or combined 5mc_plus_5hmc",
+    )
+    parser.add_argument(
         "--embedding-sidecar",
         help="optional new JSON file containing same-pass diagnostic embeddings",
     )
@@ -742,6 +784,7 @@ def main(argv: list[str] | None = None) -> int:
         embedding_sidecar=args.embedding_sidecar,
         batch_size=args.batch_size,
         input_values=args.input_values,
+        bedmethyl_modification_mode=args.bedmethyl_modification_mode,
         progress=progress,
     )
     return 0
