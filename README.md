@@ -1,7 +1,10 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/alma3-a3-signal-monogram-dark.svg">
-    <img src="assets/alma3-a3-signal-monogram-light.svg" alt="ALMA3 A3 symbol" width="96" height="96">
+    <source media="(prefers-reduced-motion: reduce) and (prefers-color-scheme: dark)" srcset="assets/alma3-a3-signal-monogram-dark.svg">
+    <source media="(prefers-reduced-motion: reduce)" srcset="assets/alma3-a3-signal-monogram-light.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/alma3-a3-motion-signature-relay-readme-dark.gif">
+    <source media="(prefers-color-scheme: light)" srcset="assets/alma3-a3-motion-signature-relay-readme-light.gif">
+    <img src="assets/alma3-a3-signal-monogram-light.svg" alt="Animated ALMA3 A3 symbol" width="96" height="96">
   </picture>
   <h1>ALMA3</h1>
   <p><strong>Epigenomic foundation and diagnostic models for hematolymphoid tumors</strong></p>
