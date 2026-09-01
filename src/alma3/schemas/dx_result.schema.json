@@ -8,7 +8,10 @@
     "kind",
     "schema_version",
     "sample_id",
+    "result_summary",
     "release",
+    "runtime",
+    "input",
     "observed_cpg_count",
     "minimum_observed_cpgs",
     "status",
@@ -18,9 +21,16 @@
   ],
   "properties": {
     "kind": {"const": "alma3_dx_result"},
-    "schema_version": {"const": 1},
-    "sample_id": {"type": "string", "minLength": 1},
+    "schema_version": {"const": 2},
+    "sample_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![=+@-])(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "result_summary": {"type": "string", "minLength": 1, "pattern": "^[^\\r\\n]+$"},
     "release": {"$ref": "#/$defs/release"},
+    "runtime": {"$ref": "#/$defs/runtime"},
+    "input": {"$ref": "#/$defs/input"},
     "observed_cpg_count": {"type": "integer", "minimum": 1},
     "minimum_observed_cpgs": {"type": "integer", "minimum": 1},
     "status": {
@@ -76,6 +86,48 @@
         "cpg_manifest_sha256": {"$ref": "#/$defs/sha256"},
         "thresholds_sha256": {"$ref": "#/$defs/sha256"}
       }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_version", "contract_sha256", "device"],
+      "properties": {
+        "package_version": {"const": "3.0.0"},
+        "contract_sha256": {"$ref": "#/$defs/sha256"},
+        "device": {"type": "string", "pattern": "^(cpu|cuda:(0|[1-9][0-9]*))$"}
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "value_mode", "clipped_value_count"],
+      "properties": {
+        "format": {"enum": ["array", "array-csv", "bedmethyl"]},
+        "value_mode": {"enum": ["beta", "mvalue", "fraction_modified"]},
+        "clipped_value_count": {"type": "integer", "minimum": 0}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "format": {"enum": ["array", "array-csv"]},
+            "value_mode": {"const": "beta"}
+          }
+        },
+        {
+          "properties": {
+            "format": {"enum": ["array", "array-csv"]},
+            "value_mode": {"const": "mvalue"},
+            "clipped_value_count": {"const": 0}
+          }
+        },
+        {
+          "properties": {
+            "format": {"const": "bedmethyl"},
+            "value_mode": {"const": "fraction_modified"},
+            "clipped_value_count": {"const": 0}
+          }
+        }
+      ]
     },
     "identityNode": {
       "type": "object",

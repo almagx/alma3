@@ -14,7 +14,7 @@ from typing import Any
 
 import torch
 
-from .clinical_result import serialize_result, validate_result
+from .clinical_result import serialize_result, validate_result, validate_sample_id
 from .data import CpGManifest
 from .dx import (
     DX_REPRESENTATION_DIMENSIONS,
@@ -44,22 +44,48 @@ EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
 _RESULT_CSV_FIELDS = (
     "sample_id",
     "result_summary",
+    "result_status",
+    "result_kind",
+    "result_schema_version",
+    "release_version",
+    "release_manifest_sha256",
+    "runtime_package_version",
+    "runtime_contract_sha256",
+    "inference_device",
+    "input_format",
+    "input_value_mode",
+    "input_clipped_value_count",
+    "observed_cpg_count",
+    "minimum_observed_cpgs",
     "resolved_level",
     "resolved_classification",
     "resolved_basis",
     "tumor_presence",
+    "tumor_presence_status",
+    "tumor_presence_model_score",
+    "tumor_presence_reporting_cutoff",
     "lineage",
+    "lineage_status",
+    "lineage_model_score",
+    "lineage_reporting_cutoff",
     "family",
+    "family_status",
+    "family_model_score",
+    "family_reporting_cutoff",
     "type",
+    "type_status",
+    "type_model_score",
+    "type_reporting_cutoff",
     "subtype",
+    "subtype_status",
+    "subtype_model_score",
+    "subtype_reporting_cutoff",
     "unresolved_level",
-    "reporting_cutoff",
+    "unresolved_reporting_cutoff",
     "differential_1_classification",
     "differential_1_model_score",
     "differential_2_classification",
     "differential_2_model_score",
-    "observed_cpg_count",
-    "model_version",
 )
 
 
@@ -124,8 +150,12 @@ def validate_embedding_sidecar(payload: Any) -> None:
         if not isinstance(sample, dict) or set(sample) != {"sample_id", "observed_cpg_count", "embedding"}:
             raise InputContractError("embedding sidecar sample fields are invalid")
         sample_id = sample["sample_id"]
-        if not isinstance(sample_id, str) or not sample_id or sample_id in seen:
-            raise InputContractError("embedding sidecar sample IDs must be nonempty and unique")
+        try:
+            validate_sample_id(sample_id)
+        except ValueError as error:
+            raise InputContractError(f"embedding sidecar {error}") from error
+        if sample_id in seen:
+            raise InputContractError("embedding sidecar sample IDs must be unique")
         seen.add(sample_id)
         observed_count = sample["observed_cpg_count"]
         if type(observed_count) is not int or observed_count < minimum:
@@ -170,23 +200,22 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
     nodes = {node["level"]: node for node in result["path"]}
     accepted_node = result["path"][-1] if result["path"] else {}
     differential = decision.get("differential", [])
-    if result["status"] == "fully_resolved":
-        summary = (
-            f"Resolved through {accepted['level']}: "
-            f"{accepted['classification']}."
-        )
-    elif result["status"] == "heme_tumor_not_detected":
-        summary = "No hematolymphoid tumor signal detected."
-    elif result["status"] == "partially_resolved":
-        summary = (
-            f"Resolved through {accepted['level']}: {accepted['classification']}; "
-            f"{decision['level']} unresolved."
-        )
-    else:
-        summary = "No call: hematolymphoid tumor presence unresolved."
     row: dict[str, Any] = {
         "sample_id": result["sample_id"],
-        "result_summary": summary,
+        "result_summary": result["result_summary"],
+        "result_status": result["status"],
+        "result_kind": result["kind"],
+        "result_schema_version": result["schema_version"],
+        "release_version": result["release"]["version"],
+        "release_manifest_sha256": result["release"]["manifest_sha256"],
+        "runtime_package_version": result["runtime"]["package_version"],
+        "runtime_contract_sha256": result["runtime"]["contract_sha256"],
+        "inference_device": result["runtime"]["device"],
+        "input_format": result["input"]["format"],
+        "input_value_mode": result["input"]["value_mode"],
+        "input_clipped_value_count": result["input"]["clipped_value_count"],
+        "observed_cpg_count": result["observed_cpg_count"],
+        "minimum_observed_cpgs": result["minimum_observed_cpgs"],
         "resolved_level": accepted.get("level", ""),
         "resolved_classification": accepted.get("classification", ""),
         "resolved_basis": (
@@ -197,7 +226,7 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
             else ""
         ),
         "unresolved_level": decision.get("level", ""),
-        "reporting_cutoff": decision.get("reporting_cutoff", ""),
+        "unresolved_reporting_cutoff": decision.get("reporting_cutoff", ""),
         "differential_1_classification": (
             differential[0]["classification"] if differential else ""
         ),
@@ -210,18 +239,23 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
         "differential_2_model_score": (
             differential[1]["model_score"] if differential else ""
         ),
-        "observed_cpg_count": result["observed_cpg_count"],
-        "model_version": result["release"]["version"],
     }
-    row.update(
-        {
-            "tumor_presence": nodes.get("presence", {}).get("classification", ""),
-            "lineage": nodes.get("lineage", {}).get("classification", ""),
-            "family": nodes.get("family", {}).get("classification", ""),
-            "type": nodes.get("type", {}).get("classification", ""),
-            "subtype": nodes.get("subtype", {}).get("classification", ""),
-        }
-    )
+    for level, prefix in (
+        ("presence", "tumor_presence"),
+        ("lineage", "lineage"),
+        ("family", "family"),
+        ("type", "type"),
+        ("subtype", "subtype"),
+    ):
+        node = nodes.get(level, {})
+        row[prefix] = node.get("classification", "")
+        row[f"{prefix}_status"] = node.get("status", "")
+        score = node.get("model_score")
+        cutoff = node.get("reporting_cutoff")
+        row[f"{prefix}_model_score"] = "" if score is None else score
+        row[f"{prefix}_reporting_cutoff"] = "" if cutoff is None else cutoff
+    if set(row) != set(_RESULT_CSV_FIELDS):
+        raise InputContractError("CSV result projection fields are invalid")
     return row
 
 
@@ -286,8 +320,10 @@ def _array_csv_batches(
             if len(row) != len(header):
                 raise InputContractError(f"array CSV row {line_no} has {len(row)} fields; expected {len(header)}")
             sample_id = row[0]
-            if not sample_id.strip():
-                raise InputContractError(f"array CSV row {line_no} has blank sample id")
+            try:
+                validate_sample_id(sample_id)
+            except ValueError as error:
+                raise InputContractError(f"array CSV row {line_no} {error}") from error
             if sample_id in seen_sample_ids:
                 raise InputContractError(f"array CSV has duplicate sample id: {sample_id}")
             seen_sample_ids.add(sample_id)
@@ -398,9 +434,15 @@ def load_bed_methyl_with_manifest(
             raise InputContractError("bedMethyl input changed while inference was running")
     if int(observed.sum().item()) == 0:
         raise InputContractError("bedMethyl input did not match any release CpGs")
-    sid = sample_id or input_path.name.replace(".bed.gz", "").replace(".bed", "")
-    if not isinstance(sid, str) or not sid.strip():
-        raise InputContractError("bedMethyl sample id must be nonempty")
+    sid = (
+        input_path.name.replace(".bed.gz", "").replace(".bed", "")
+        if sample_id is None
+        else sample_id
+    )
+    try:
+        validate_sample_id(sid)
+    except ValueError as error:
+        raise InputContractError(f"bedMethyl {error}") from error
     return [sid], values[None, :], observed[None, :], coverage_by_cpg[None, :]
 
 
@@ -528,7 +570,7 @@ def run_inference(
         )
     else:
         batches = (
-            (*batch, _ArrayValueSummary(0, 0))
+            (*batch, _ArrayValueSummary(0, 0, (0,) * len(batch[0])))
             for batch in _bedmethyl_batches(inputs, runtime.cpg, batch_size=batch_size)
         )
     minimum_observed = runtime.minimum_observed_cpgs
@@ -549,17 +591,28 @@ def run_inference(
             for sample_ids, x, observed, uncertainty, adjustment in batches:
                 adjustment_observed += adjustment.observed
                 adjustment_clipped += adjustment.clipped
+                input_metadata = [
+                    {
+                        "format": input_format,
+                        "value_mode": (
+                            input_values if input_format == "array-csv" else "fraction_modified"
+                        ),
+                        "clipped_value_count": clipped,
+                    }
+                    for clipped in adjustment.clipped_by_sample
+                ]
                 clinical_results, embedding, observed_counts = runtime._predict_tensors(
                     sample_ids,
                     x,
                     observed,
                     uncertainty,
+                    input_metadata,
                 )
                 if sidecar_out is not None:
                     vectors = embedding.detach().to(device="cpu", dtype=torch.float32).tolist()
                     sidecar_samples.extend(
                         {
-                            "sample_id": str(sample_id),
+                            "sample_id": sample_id,
                             "observed_cpg_count": observed_count,
                             "embedding": vector,
                         }
@@ -620,7 +673,9 @@ def run_inference(
         temporary.unlink(missing_ok=True)
     if adjustment_clipped:
         print(
-            _adjustment_message(_ArrayValueSummary(adjustment_observed, adjustment_clipped)),
+            _adjustment_message(
+                _ArrayValueSummary(adjustment_observed, adjustment_clipped, ())
+            ),
             file=sys.stderr,
         )
     if progress:

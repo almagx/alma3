@@ -8,11 +8,12 @@ from typing import Any
 
 import torch
 
+from . import __version__
 from .dx import DX_TARGETS, PRESENT_LABEL, DxContractError, Taxonomy, apply_temperatures
 from .release import RELEASE_VERSION
 
 RESULT_KIND = "alma3_dx_result"
-RESULT_SCHEMA_VERSION = 1
+RESULT_SCHEMA_VERSION = 2
 RESULT_STATUSES = (
     "no_call",
     "heme_tumor_not_detected",
@@ -36,6 +37,15 @@ _RELEASE_HASH_FIELDS = {
     "thresholds_sha256",
 }
 _RELEASE_FIELDS = {"version", *_RELEASE_HASH_FIELDS}
+_RUNTIME_FIELDS = {"package_version", "contract_sha256", "device"}
+_INPUT_FIELDS = {"format", "value_mode", "clipped_value_count"}
+_LEVEL_DISPLAY = {
+    "presence": "hematolymphoid tumor presence",
+    "lineage": "lineage",
+    "family": "family",
+    "type": "type",
+    "subtype": "subtype",
+}
 
 
 def result_schema_path() -> Path:
@@ -44,6 +54,49 @@ def result_schema_path() -> Path:
 
 def _is_sha256(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
+def validate_sample_id(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("sample ID must be a nonempty string")
+    if value != value.strip():
+        raise ValueError("sample ID must not have leading or trailing whitespace")
+    if any(ord(character) <= 0x1F or ord(character) == 0x7F for character in value):
+        raise ValueError("sample ID must not contain ASCII control characters")
+    if value[0] in "=+-@":
+        raise ValueError("sample ID must not begin with =, +, -, or @")
+    return value
+
+
+def _result_summary(result: dict[str, Any]) -> str:
+    status = result["status"]
+    if status == "no_call":
+        return (
+            "No call: hematolymphoid tumor presence unresolved. Review the two leading "
+            "possibilities in the differential."
+        )
+
+    accepted = result["accepted"]
+    accepted_node = result["path"][-1]
+    confidence = (
+        f" ({float(accepted_node['model_score']) * 100.0:.1f}% confidence)"
+        if accepted_node["status"] == "resolved"
+        else ""
+    )
+    if status == "heme_tumor_not_detected":
+        return f"No hematolymphoid tumor signal detected{confidence}."
+
+    resolved = (
+        f"Resolved through {_LEVEL_DISPLAY[accepted['level']]}: "
+        f"{accepted['classification']}{confidence}"
+    )
+    if status == "partially_resolved":
+        unresolved = _LEVEL_DISPLAY[result["decision"]["level"]]
+        return (
+            f"{resolved}; {unresolved} unresolved. Review the two leading possibilities "
+            "in the differential."
+        )
+    return f"{resolved}."
 
 
 def _rank_candidates(
@@ -115,6 +168,8 @@ def _unresolved_decision(
 def _result(
     sample_id: str,
     release: dict[str, str],
+    runtime: dict[str, str],
+    input_metadata: dict[str, Any],
     observed_cpg_count: int,
     minimum_observed_cpgs: int,
     status: str,
@@ -130,7 +185,10 @@ def _result(
         "kind": RESULT_KIND,
         "schema_version": RESULT_SCHEMA_VERSION,
         "sample_id": sample_id,
+        "result_summary": "",
         "release": dict(release),
+        "runtime": dict(runtime),
+        "input": dict(input_metadata),
         "observed_cpg_count": observed_cpg_count,
         "minimum_observed_cpgs": minimum_observed_cpgs,
         "status": status,
@@ -138,6 +196,7 @@ def _result(
         "path": path,
         "decision": decision,
     }
+    result["result_summary"] = _result_summary(result)
     validate_result(result)
     return result
 
@@ -149,17 +208,26 @@ def results_from_logits(
     taxonomy: Taxonomy,
     release: dict[str, str],
     *,
+    runtime: dict[str, str],
+    input_metadata: Iterable[dict[str, Any]],
     observed_cpg_counts: Iterable[int],
     minimum_observed_cpgs: int,
 ) -> list[dict[str, Any]]:
     _validate_release(release)
+    _validate_runtime(runtime)
     scaled = apply_temperatures(logits, thresholds, taxonomy)
-    ids = [str(sample_id) for sample_id in sample_ids]
+    ids = list(sample_ids)
+    inputs = list(input_metadata)
     observed_counts = list(observed_cpg_counts)
     batch = next(iter(scaled.values())).shape[0]
+    try:
+        for sample_id in ids:
+            validate_sample_id(sample_id)
+    except ValueError as error:
+        raise DxContractError(f"result {error}") from error
     if (
         len(ids) != batch
-        or any(not sample_id for sample_id in ids)
+        or len(inputs) != batch
         or len(ids) != len(set(ids))
         or len(observed_counts) != batch
         or type(minimum_observed_cpgs) is not int
@@ -167,12 +235,14 @@ def results_from_logits(
         or any(type(count) is not int or count < minimum_observed_cpgs for count in observed_counts)
     ):
         raise DxContractError("result sample IDs must be non-empty, unique, and aligned with logits")
+    for metadata, observed_count in zip(inputs, observed_counts, strict=True):
+        _validate_input(metadata, observed_count)
 
     stops = {LEVEL_BY_TARGET[target]: float(thresholds["thresholds"][target]) for target in DX_TARGETS}
     present_idx = taxonomy.classes["hematolymphoid_tumor_presence"].index(PRESENT_LABEL)
     results = []
-    for row_idx, (sample_id, observed_cpg_count) in enumerate(
-        zip(ids, observed_counts, strict=True)
+    for row_idx, (sample_id, input_info, observed_cpg_count) in enumerate(
+        zip(ids, inputs, observed_counts, strict=True)
     ):
         path: list[dict[str, Any]] = []
         presence = torch.softmax(scaled["hematolymphoid_tumor_presence"][row_idx].float(), dim=-1)
@@ -183,6 +253,8 @@ def results_from_logits(
                 _result(
                     sample_id,
                     release,
+                    runtime,
+                    input_info,
                     observed_cpg_count,
                     minimum_observed_cpgs,
                     "no_call",
@@ -211,6 +283,8 @@ def results_from_logits(
                 _result(
                     sample_id,
                     release,
+                    runtime,
+                    input_info,
                     observed_cpg_count,
                     minimum_observed_cpgs,
                     "heme_tumor_not_detected",
@@ -245,6 +319,8 @@ def results_from_logits(
                     _result(
                         sample_id,
                         release,
+                        runtime,
+                        input_info,
                         observed_cpg_count,
                         minimum_observed_cpgs,
                         "partially_resolved",
@@ -262,6 +338,8 @@ def results_from_logits(
                 _result(
                     sample_id,
                     release,
+                    runtime,
+                    input_info,
                     observed_cpg_count,
                     minimum_observed_cpgs,
                     "fully_resolved",
@@ -280,6 +358,46 @@ def _validate_release(release: Any) -> None:
     for field in _RELEASE_HASH_FIELDS:
         if not _is_sha256(release[field]):
             raise DxContractError(f"result release {field} must be a lowercase SHA-256")
+
+
+def _validate_runtime(runtime: Any) -> None:
+    if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
+        raise DxContractError("result runtime fields are invalid")
+    if runtime["package_version"] != __version__:
+        raise DxContractError("result runtime package version is invalid")
+    if not _is_sha256(runtime["contract_sha256"]):
+        raise DxContractError("result runtime contract_sha256 must be a lowercase SHA-256")
+    device = runtime["device"]
+    if device == "cpu":
+        return
+    if not isinstance(device, str) or not device.startswith("cuda:"):
+        raise DxContractError("result runtime device is invalid")
+    index = device.removeprefix("cuda:")
+    if not index.isdigit() or str(int(index)) != index:
+        raise DxContractError("result runtime device is invalid")
+
+
+def _validate_input(metadata: Any, observed_cpg_count: int) -> None:
+    if not isinstance(metadata, dict) or set(metadata) != _INPUT_FIELDS:
+        raise DxContractError("result input fields are invalid")
+    input_format = metadata["format"]
+    value_mode = metadata["value_mode"]
+    clipped = metadata["clipped_value_count"]
+    if not isinstance(input_format, str) or input_format not in {
+        "array",
+        "array-csv",
+        "bedmethyl",
+    }:
+        raise DxContractError("result input format is invalid")
+    if input_format in {"array", "array-csv"}:
+        if not isinstance(value_mode, str) or value_mode not in {"beta", "mvalue"}:
+            raise DxContractError("result array input value mode is invalid")
+    elif value_mode != "fraction_modified":
+        raise DxContractError("result bedMethyl input value mode is invalid")
+    if type(clipped) is not int or clipped < 0 or clipped > observed_cpg_count:
+        raise DxContractError("result input clipped value count is invalid")
+    if (input_format == "bedmethyl" or value_mode == "mvalue") and clipped != 0:
+        raise DxContractError("result input mode cannot report clipped values")
 
 
 def _validate_score(value: Any, description: str, *, nullable: bool = False) -> None:
@@ -320,7 +438,10 @@ def validate_result(result: Any) -> None:
         "kind",
         "schema_version",
         "sample_id",
+        "result_summary",
         "release",
+        "runtime",
+        "input",
         "observed_cpg_count",
         "minimum_observed_cpgs",
         "status",
@@ -332,9 +453,12 @@ def validate_result(result: Any) -> None:
         raise DxContractError("Dx result fields are invalid")
     if result["kind"] != RESULT_KIND or result["schema_version"] != RESULT_SCHEMA_VERSION:
         raise DxContractError("Dx result kind or schema version is invalid")
-    if not isinstance(result["sample_id"], str) or not result["sample_id"]:
-        raise DxContractError("Dx result sample_id is invalid")
+    try:
+        validate_sample_id(result["sample_id"])
+    except ValueError as error:
+        raise DxContractError(f"Dx result {error}") from error
     _validate_release(result["release"])
+    _validate_runtime(result["runtime"])
     observed_count = result["observed_cpg_count"]
     minimum_observed = result["minimum_observed_cpgs"]
     if (
@@ -344,6 +468,7 @@ def validate_result(result: Any) -> None:
         or observed_count < minimum_observed
     ):
         raise DxContractError("Dx result observed-CpG support is invalid")
+    _validate_input(result["input"], observed_count)
     if result["status"] not in RESULT_STATUSES:
         raise DxContractError("Dx result status is invalid")
 
@@ -445,6 +570,8 @@ def validate_result(result: Any) -> None:
         not path or path[0]["classification"] != PRESENT_LABEL
     ):
         raise DxContractError("resolved Dx results require an issued present tumor signal")
+    if not isinstance(result["result_summary"], str) or result["result_summary"] != _result_summary(result):
+        raise DxContractError("Dx result summary is invalid")
 
 
 def serialize_result(result: dict[str, Any]) -> str:

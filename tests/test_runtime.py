@@ -5,11 +5,13 @@ import gzip
 import hashlib
 import json
 import math
+import runpy
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+import warnings
 from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
@@ -24,6 +26,7 @@ from alma3.config import DxConfig
 from alma3.data import CpGManifest
 from alma3.dx import DX_TARGETS, DiagnosticModel
 from alma3.hashes import publish_new_file as publish_new_file_actual
+from alma3.hashes import runtime_contract_sha256
 from alma3.infer import (
     _RESULT_CSV_FIELDS,
     InputContractError,
@@ -76,6 +79,33 @@ def _assert_json_close(test: unittest.TestCase, left, right, *, atol: float = 1e
 
 
 class RuntimeContractTests(unittest.TestCase):
+    def test_runtime_contract_fingerprint_is_deterministic_and_content_bound(self) -> None:
+        package = Path(__file__).resolve().parents[1] / "src" / "alma3"
+        expected = runtime_contract_sha256(package)
+        self.assertEqual(expected, runtime_contract_sha256(package))
+        self.assertEqual(len(expected), 64)
+
+        with tempfile.TemporaryDirectory() as raw:
+            copied = Path(raw) / "alma3"
+            shutil.copytree(package, copied)
+            self.assertEqual(runtime_contract_sha256(copied), expected)
+
+            (copied / "examples" / "ignored.csv").write_text("ignored\n", encoding="utf-8")
+            (copied / "examples" / "ignored.py").write_text("ignored = True\n", encoding="utf-8")
+            (copied / "__pycache__").mkdir(exist_ok=True)
+            (copied / "__pycache__" / "ignored.pyc").write_bytes(b"ignored")
+            (copied / "__pycache__" / "ignored.py").write_text("ignored = True\n", encoding="utf-8")
+            (copied / "generated-output.txt").write_text("ignored\n", encoding="utf-8")
+            self.assertEqual(runtime_contract_sha256(copied), expected)
+
+            source = copied / "clinical_result.py"
+            source.write_text(source.read_text(encoding="utf-8") + "# fingerprint change\n", encoding="utf-8")
+            self.assertNotEqual(runtime_contract_sha256(copied), expected)
+
+            (copied / "schemas" / "dx_result.schema.json").unlink()
+            with self.assertRaisesRegex(FileNotFoundError, "missing contract file"):
+                runtime_contract_sha256(copied)
+
     def test_x86_cpu_requires_mkl_before_model_load(self) -> None:
         with (
             patch("alma3.runtime.platform.machine", return_value="x86_64"),
@@ -189,6 +219,17 @@ class RuntimeContractTests(unittest.TestCase):
             results = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(embedded_batch_sizes, [2])
             self.assertEqual([result["sample_id"] for result in results], ["first", "second"])
+            self.assertTrue(
+                all(
+                    result["input"]
+                    == {
+                        "format": "bedmethyl",
+                        "value_mode": "fraction_modified",
+                        "clipped_value_count": 0,
+                    }
+                    for result in results
+                )
+            )
 
     def test_invalid_outputs_fail_before_model_loading(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -237,6 +278,13 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertEqual(embedded_batch_sizes, [2, 1])
             self.assertEqual([int(call.args[0].shape[0]) for call in align.call_args_list], [2, 1])
             self.assertEqual([result["sample_id"] for result in results], ["first", "second", "third"])
+            self.assertTrue(all(result["input"]["format"] == "array" for result in results))
+            self.assertTrue(all(result["input"]["value_mode"] == "beta" for result in results))
+            self.assertTrue(all(result["input"]["clipped_value_count"] == 0 for result in results))
+            self.assertTrue(all(result["runtime"]["device"] == "cpu" for result in results))
+            self.assertTrue(
+                all(result["runtime"]["contract_sha256"] == runtime_contract_sha256() for result in results)
+            )
 
     def test_corrected_beta_policy_accepts_only_bounded_beta_like_rows(self) -> None:
         accepted = {
@@ -252,6 +300,7 @@ class RuntimeContractTests(unittest.TestCase):
                 )
                 self.assertEqual(summary.observed, 100)
                 self.assertEqual(summary.clipped, 10)
+                self.assertEqual(summary.clipped_by_sample, (10,))
                 self.assertTrue(bool(observed.all().item()))
                 self.assertEqual(prepared[0, 89].item(), 0.5)
                 self.assertEqual(prepared[0, 90:].tolist(), [bound] * 10)
@@ -260,7 +309,9 @@ class RuntimeContractTests(unittest.TestCase):
         prepared, observed, summary = _prepare_array_values(ordinary, ["ordinary"], input_values="beta")
         self.assertTrue(torch.equal(prepared[observed], ordinary[observed]))
         self.assertTrue(bool(torch.isnan(prepared[~observed]).all().item()))
-        self.assertEqual(summary, (3, 0))
+        self.assertEqual(summary.observed, 3)
+        self.assertEqual(summary.clipped, 0)
+        self.assertEqual(summary.clipped_by_sample, (0,))
 
         rejected = {
             "inside": torch.tensor([[*([0.5] * 89), *([-0.01] * 10), -0.1]]),
@@ -274,6 +325,109 @@ class RuntimeContractTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "not beta-like"):
                 _prepare_array_values(values, [name], input_values="beta")
 
+    def test_per_sample_clipping_metadata_is_batch_invariant(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            cpg_ids = list(validated["cpg"].cpg_ids)
+            beta = torch.full((3, len(cpg_ids)), 0.5)
+            beta[0, 0] = -0.01
+            beta[1, :2] = 1.01
+
+            outputs = []
+            with (
+                patch("alma3.runtime.load_release", return_value=validated),
+                warnings.catch_warnings(record=True) as emitted,
+            ):
+                warnings.simplefilter("always")
+                runtime = ALMA3(release, device="cpu")
+                for batch_size in (2, 3):
+                    outputs.append(
+                        runtime.predict_array(
+                            beta,
+                            cpg_ids,
+                            ["first", "second", "third"],
+                            batch_size=batch_size,
+                        )
+                    )
+                mvalue_results = runtime.predict_array(
+                    torch.zeros_like(beta),
+                    cpg_ids,
+                    ["first", "second", "third"],
+                    input_values="mvalue",
+                )
+            self.assertEqual(len(emitted), 2)
+            for results in outputs:
+                self.assertEqual(
+                    [result["input"]["clipped_value_count"] for result in results],
+                    [1, 2, 0],
+                )
+            self.assertEqual(
+                [result["input"] for result in outputs[0]],
+                [result["input"] for result in outputs[1]],
+            )
+            self.assertTrue(
+                all(
+                    result["input"]
+                    == {
+                        "format": "array",
+                        "value_mode": "mvalue",
+                        "clipped_value_count": 0,
+                    }
+                    for result in mvalue_results
+                )
+            )
+
+    def test_array_csv_clipping_metadata_remains_per_sample(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            input_path = root / "input.csv"
+            write_array_csv(input_path, sample_count=2)
+            with input_path.open(encoding="utf-8", newline="") as handle:
+                rows = list(csv.reader(handle))
+            rows[1][1] = "-0.01"
+            rows[2][1:3] = ["1.01", "1.01"]
+            with input_path.open("w", encoding="utf-8", newline="") as handle:
+                csv.writer(handle, lineterminator="\n").writerows(rows)
+
+            output = root / "result.jsonl"
+            stderr = StringIO()
+            with (
+                patch("alma3.runtime.load_release", return_value=validated),
+                redirect_stderr(stderr),
+            ):
+                run_inference(
+                    release,
+                    input_path,
+                    "array-csv",
+                    output,
+                    device="cpu",
+                    batch_size=1,
+                )
+            results = [
+                json.loads(line)
+                for line in output.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual(
+                [result["input"] for result in results],
+                [
+                    {
+                        "format": "array-csv",
+                        "value_mode": "beta",
+                        "clipped_value_count": 1,
+                    },
+                    {
+                        "format": "array-csv",
+                        "value_mode": "beta",
+                        "clipped_value_count": 2,
+                    },
+                ],
+            )
+            self.assertIn("clipped 3/3,000 matched values", stderr.getvalue())
+
     def test_explicit_mvalues_convert_stably_and_missing_stays_unobserved(self) -> None:
         converted, observed, summary = _prepare_array_values(
             torch.tensor([[-1000.0, 0.0, 1000.0, math.nan]]),
@@ -284,6 +438,7 @@ class RuntimeContractTests(unittest.TestCase):
         self.assertEqual(observed.tolist(), [[True, True, True, False]])
         self.assertEqual(summary.observed, 3)
         self.assertEqual(summary.clipped, 0)
+        self.assertEqual(summary.clipped_by_sample, (0,))
         with self.assertRaisesRegex(ValueError, "infinity"):
             _prepare_array_values(torch.tensor([[math.inf]]), ["bad"], input_values="mvalue")
         with self.assertRaisesRegex(ValueError, "infinity"):
@@ -308,6 +463,51 @@ class RuntimeContractTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(InputContractError, "non-numeric value"):
                 list(_array_csv_batches(invalid, manifest, minimum_observed_cpgs=1500))
+
+    def test_sample_id_safety_is_shared_across_input_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+
+            array_path = root / "unsafe.csv"
+            write_array_csv(array_path, sample_count=1)
+            array_path.write_text(
+                array_path.read_text(encoding="utf-8").replace("sample-1,", "=formula,"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(InputContractError, "sample ID"):
+                list(
+                    _array_csv_batches(
+                        array_path,
+                        validated["cpg"],
+                        minimum_observed_cpgs=1500,
+                    )
+                )
+
+            bed_path = root / "=formula.bed"
+            write_bedmethyl(bed_path)
+            with self.assertRaisesRegex(InputContractError, "sample ID"):
+                load_bed_methyl_with_manifest(bed_path, validated["cpg"])
+            with self.assertRaisesRegex(InputContractError, "sample ID"):
+                load_bed_methyl_with_manifest(bed_path, validated["cpg"], sample_id="")
+
+            beta = torch.full((1, len(validated["cpg"].cpg_ids)), 0.5)
+            with patch("alma3.runtime.load_release", return_value=validated):
+                runtime = ALMA3(release, device="cpu")
+                for unsafe in ("=formula", " sample", "sample\nname", 7):
+                    with self.subTest(unsafe=unsafe), self.assertRaisesRegex(ValueError, "sample ID"):
+                        runtime.predict_array(
+                            beta,
+                            validated["cpg"].cpg_ids,
+                            [unsafe],
+                        )
+                result = runtime.predict_array(
+                    beta,
+                    validated["cpg"].cpg_ids,
+                    ["Tumor α 01"],
+                )[0]
+            self.assertEqual(result["sample_id"], "Tumor α 01")
 
     def test_rejected_corrected_input_publishes_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -554,6 +754,10 @@ class RuntimeContractTests(unittest.TestCase):
             invalid_sidecar["representation"]["dimensions"] = 8
             with self.assertRaisesRegex(InputContractError, "representation is invalid"):
                 validate_embedding_sidecar(invalid_sidecar)
+            unsafe_sidecar = json.loads(json.dumps(payload))
+            unsafe_sidecar["samples"][0]["sample_id"] = "=formula"
+            with self.assertRaisesRegex(InputContractError, "sample ID"):
+                validate_embedding_sidecar(unsafe_sidecar)
             self.assertEqual([row["sample_id"] for row in results], ["sample-1", "sample-2", "sample-3"])
             self.assertEqual(
                 [row["sample_id"] for row in payload["samples"]],
@@ -572,24 +776,78 @@ class RuntimeContractTests(unittest.TestCase):
             validated = validated_release_fixture(release, model)
             input_path = root / "input.csv"
             write_array_csv(input_path, sample_count=3)
-            output = root / "result.csv"
+            json_output = root / "result.jsonl"
+            csv_output = root / "result.csv"
 
-            with (
-                patch("alma3.runtime.load_release", return_value=validated),
-                patch("alma3.infer._result_csv_row", wraps=_result_csv_row) as flatten,
-            ):
-                run_inference(release, input_path, "array-csv", output, device="cpu")
+            with patch("alma3.runtime.load_release", return_value=validated):
+                run_inference(release, input_path, "array-csv", json_output, device="cpu")
+                run_inference(release, input_path, "array-csv", csv_output, device="cpu")
 
-            with output.open(encoding="utf-8", newline="") as handle:
+            results = [
+                json.loads(line)
+                for line in json_output.read_text(encoding="utf-8").splitlines()
+            ]
+            with csv_output.open(encoding="utf-8", newline="") as handle:
                 reader = csv.DictReader(handle)
                 rows = list(reader)
             self.assertEqual(tuple(reader.fieldnames or ()), _RESULT_CSV_FIELDS)
             expected = [
-                {field: "" if value == "" else str(value) for field, value in _result_csv_row(call.args[0]).items()}
-                for call in flatten.call_args_list
+                {
+                    field: "" if value == "" else str(value)
+                    for field, value in _result_csv_row(result).items()
+                }
+                for result in results
             ]
             self.assertEqual(rows, expected)
+            inspect_paired_results = runpy.run_path(
+                str(Path(__file__).resolve().parents[1] / "scripts" / "release-gate"),
+                run_name="alma3_release_gate_test",
+            )["inspect_paired_results"]
+            inspect_paired_results(json_output, csv_output)
+            tampered_csv = root / "tampered.csv"
+            tampered_rows = [dict(row) for row in rows]
+            tampered_rows[0]["observed_cpg_count"] = "999999"
+            with tampered_csv.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=_RESULT_CSV_FIELDS, lineterminator="\n")
+                writer.writeheader()
+                writer.writerows(tampered_rows)
+            with self.assertRaisesRegex(RuntimeError, "inconsistent"):
+                inspect_paired_results(json_output, tampered_csv)
             self.assertEqual([row["sample_id"] for row in rows], ["sample-1", "sample-2", "sample-3"])
+            self.assertTrue(all(row["result_summary"] == result["result_summary"] for row, result in zip(rows, results, strict=True)))
+            self.assertTrue(all(row["input_format"] == "array-csv" for row in rows))
+            self.assertTrue(all(row["input_value_mode"] == "beta" for row in rows))
+            self.assertTrue(all(row["input_clipped_value_count"] == "0" for row in rows))
+            release_hash_files = {
+                "model_sha256": "model.safetensors",
+                "taxonomy_sha256": "taxonomy.json",
+                "cpg_manifest_sha256": "cpg_manifest.json",
+                "thresholds_sha256": "thresholds.json",
+            }
+            target_by_level = {
+                "presence": "hematolymphoid_tumor_presence",
+                "lineage": "lineage",
+                "family": "family",
+                "type": "type",
+                "subtype": "subtype",
+            }
+            for result, row in zip(results, rows, strict=True):
+                self.assertEqual(row["release_manifest_sha256"], validated["manifest_sha256"])
+                for field, filename in release_hash_files.items():
+                    self.assertEqual(result["release"][field], validated["hashes"][filename])
+                for node in result["path"]:
+                    target = target_by_level[node["level"]]
+                    self.assertEqual(
+                        validated["taxonomy"].classes[target][node["index"]],
+                        node["classification"],
+                    )
+                if result["decision"] is not None:
+                    target = target_by_level[result["decision"]["level"]]
+                    for entry in result["decision"]["differential"]:
+                        self.assertEqual(
+                            validated["taxonomy"].classes[target][entry["index"]],
+                            entry["classification"],
+                        )
 
     def test_csv_serialization_failure_publishes_neither_result_nor_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

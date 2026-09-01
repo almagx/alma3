@@ -9,8 +9,10 @@ from typing import Any, NamedTuple
 
 import torch
 
-from .clinical_result import results_from_logits
+from . import __version__
+from .clinical_result import results_from_logits, validate_sample_id
 from .download import load_release
+from .hashes import runtime_contract_sha256
 from .sitewise import real_coverage_presentation
 
 DEFAULT_BATCH_SIZE = 2
@@ -53,6 +55,7 @@ def _require_supported_cuda_memory(device: torch.device) -> None:
 class _ArrayValueSummary(NamedTuple):
     observed: int
     clipped: int
+    clipped_by_sample: tuple[int, ...]
 
 
 def _adjustment_message(summary: _ArrayValueSummary) -> str:
@@ -71,25 +74,30 @@ def _prepare_array_values(
     if input_values not in {"beta", "mvalue"}:
         raise ValueError("input_values must be beta or mvalue")
     matched = values.detach().to(device="cpu", dtype=torch.float32)
+    ids = list(sample_ids)
+    if len(ids) != matched.shape[0]:
+        raise ValueError("sample IDs must match array rows")
+    for sample_id in ids:
+        validate_sample_id(sample_id)
     if bool(torch.isinf(matched).any().item()):
         raise ValueError("array values must not contain infinity")
     finite = torch.isfinite(matched)
     observed_count = int(finite.sum().item())
     if input_values == "mvalue":
         converted = torch.sigmoid(matched * math.log(2.0))
-        return converted, finite, _ArrayValueSummary(observed_count, 0)
+        return converted, finite, _ArrayValueSummary(observed_count, 0, (0,) * len(ids))
 
     clipped_count = 0
-    ids = [str(value) for value in sample_ids]
-    if len(ids) != matched.shape[0]:
-        raise ValueError("sample IDs must match array rows")
+    clipped_by_sample: list[int] = []
     for sample_id, row, row_finite in zip(ids, matched, finite, strict=True):
         observed = row[row_finite]
         if observed.numel() == 0:
+            clipped_by_sample.append(0)
             continue
         inside = (observed >= 0) & (observed <= 1)
         outside_count = int((~inside).sum().item())
         if outside_count == 0:
+            clipped_by_sample.append(0)
             continue
         near = (observed >= -0.05) & (observed <= 1.05)
         count = int(observed.numel())
@@ -108,7 +116,12 @@ def _prepare_array_values(
                 f"range {minimum:g} to {maximum:g}; if these are M-values, use --input-values mvalue"
             )
         clipped_count += outside_count
-    return matched.clamp(0, 1), finite, _ArrayValueSummary(observed_count, clipped_count)
+        clipped_by_sample.append(outside_count)
+    return matched.clamp(0, 1), finite, _ArrayValueSummary(
+        observed_count,
+        clipped_count,
+        tuple(clipped_by_sample),
+    )
 
 
 def resolve_device(value: str) -> torch.device:
@@ -167,6 +180,7 @@ class ALMA3:
         self.device = resolve_device(device)
         _require_supported_cpu_build(self.device)
         _require_supported_cuda_memory(self.device)
+        contract_sha256 = runtime_contract_sha256()
         validated = load_release(artifact, device=str(self.device))
         self.artifact = validated["root"]
         self._validated = validated
@@ -182,6 +196,11 @@ class ALMA3:
             "taxonomy_sha256": hashes["taxonomy.json"],
             "cpg_manifest_sha256": hashes["cpg_manifest.json"],
             "thresholds_sha256": hashes["thresholds.json"],
+        }
+        self.runtime_identity = {
+            "package_version": __version__,
+            "contract_sha256": contract_sha256,
+            "device": str(self.device),
         }
         self.sidecar_release_identity = {
             "manifest_sha256": validated["manifest_sha256"],
@@ -204,14 +223,19 @@ class ALMA3:
         beta: torch.Tensor,
         observed: torch.Tensor,
         uncertainty: torch.Tensor,
+        input_metadata: Sequence[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], torch.Tensor, list[int]]:
-        ids = [str(value) for value in sample_ids]
-        if not ids or any(not value.strip() for value in ids) or len(ids) != len(set(ids)):
+        ids = list(sample_ids)
+        for sample_id in ids:
+            validate_sample_id(sample_id)
+        if not ids or len(ids) != len(set(ids)):
             raise ValueError("sample IDs must be nonempty and unique")
         if beta.ndim != 2 or beta.shape != observed.shape or beta.shape != uncertainty.shape:
             raise ValueError("beta, observed, and uncertainty must have the same two-dimensional shape")
         if beta.shape[0] != len(ids) or beta.shape[1] != len(self.cpg.cpg_ids):
             raise ValueError("sample tensors do not match sample IDs or the release CpG manifest")
+        if len(input_metadata) != len(ids):
+            raise ValueError("input metadata must match sample IDs")
         observed_counts = [int(value) for value in observed.sum(dim=1).tolist()]
         too_sparse = [
             f"{sample_id}:{count}"
@@ -241,6 +265,8 @@ class ALMA3:
                 self.thresholds,
                 self.taxonomy,
                 self.release_identity,
+                runtime=self.runtime_identity,
+                input_metadata=input_metadata,
                 observed_cpg_counts=observed_counts,
                 minimum_observed_cpgs=self.minimum_observed_cpgs,
             )
@@ -266,6 +292,7 @@ class ALMA3:
         batch_beta: list[torch.Tensor] = []
         batch_observed: list[torch.Tensor] = []
         batch_uncertainty: list[torch.Tensor] = []
+        batch_input_metadata: list[dict[str, Any]] = []
 
         def flush() -> None:
             if not batch_ids:
@@ -275,12 +302,14 @@ class ALMA3:
                 torch.cat(batch_beta),
                 torch.cat(batch_observed),
                 torch.cat(batch_uncertainty),
+                batch_input_metadata,
             )
             results.extend(batch_results)
             batch_ids.clear()
             batch_beta.clear()
             batch_observed.clear()
             batch_uncertainty.clear()
+            batch_input_metadata.clear()
 
         for path in paths:
             sample_ids, beta, observed, coverage = load_bed_methyl_with_manifest(path, self.cpg)
@@ -293,6 +322,13 @@ class ALMA3:
             batch_beta.append(presentation.beta_input)
             batch_observed.append(presentation.input_observed)
             batch_uncertainty.append(presentation.uncertainty)
+            batch_input_metadata.append(
+                {
+                    "format": "bedmethyl",
+                    "value_mode": "fraction_modified",
+                    "clipped_value_count": 0,
+                }
+            )
             if len(batch_ids) == size:
                 flush()
         flush()
@@ -326,9 +362,11 @@ class ALMA3:
         ids = (
             [f"sample-{index + 1}" for index in range(values.shape[0])]
             if sample_ids is None
-            else [str(value) for value in sample_ids]
+            else list(sample_ids)
         )
-        if len(ids) != values.shape[0] or any(not value.strip() for value in ids) or len(ids) != len(set(ids)):
+        for sample_id in ids:
+            validate_sample_id(sample_id)
+        if len(ids) != values.shape[0] or len(ids) != len(set(ids)):
             raise ValueError("sample_ids must be nonempty, unique, and match beta rows")
 
         matched = [
@@ -368,11 +406,19 @@ class ALMA3:
                 aligned,
                 observed,
                 torch.zeros_like(aligned),
+                [
+                    {
+                        "format": "array",
+                        "value_mode": input_values,
+                        "clipped_value_count": clipped,
+                    }
+                    for clipped in summary.clipped_by_sample
+                ],
             )
             results.extend(batch_results)
         if clipped_total:
             warnings.warn(
-                _adjustment_message(_ArrayValueSummary(observed_total, clipped_total)),
+                _adjustment_message(_ArrayValueSummary(observed_total, clipped_total, ())),
                 stacklevel=2,
             )
         return results

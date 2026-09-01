@@ -6,6 +6,21 @@ import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+_RUNTIME_CONTRACT_REQUIRED_FILES = (
+    "__init__.py",
+    "release_catalog.json",
+    "schemas/dx_result.schema.json",
+    "schemas/embedding_sidecar.schema.json",
+    "schemas/release.schema.json",
+)
+_RUNTIME_CONTRACT_EXCLUDED_DIRECTORIES = {
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "examples",
+}
+
 
 def sha256_file(path: str | Path) -> str:
     digest = hashlib.sha256()
@@ -13,6 +28,33 @@ def sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def runtime_contract_sha256(package_root: str | Path | None = None) -> str:
+    root = Path(package_root) if package_root is not None else Path(__file__).parent
+    if not root.is_dir():
+        raise FileNotFoundError(f"runtime package root is not a directory: {root}")
+    missing = [name for name in _RUNTIME_CONTRACT_REQUIRED_FILES if not (root / name).is_file()]
+    if missing:
+        raise FileNotFoundError(f"runtime package is missing contract file(s): {', '.join(missing)}")
+
+    python_paths = {
+        path
+        for path in root.rglob("*.py")
+        if not set(path.relative_to(root).parts[:-1]) & _RUNTIME_CONTRACT_EXCLUDED_DIRECTORIES
+    }
+    paths = {
+        *python_paths,
+        *(root / "schemas").glob("*.json"),
+        root / "release_catalog.json",
+    }
+    manifest = {
+        path.relative_to(root).as_posix(): sha256_file(path)
+        for path in sorted(paths, key=lambda value: value.relative_to(root).as_posix())
+        if path.is_file()
+    }
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def read_sha256_manifest(path: str | Path) -> dict[str, str]:

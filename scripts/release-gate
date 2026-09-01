@@ -5,6 +5,7 @@ import argparse
 import csv
 import gzip
 import hashlib
+import json
 import os
 import shutil
 import subprocess
@@ -45,6 +46,42 @@ def inspect_wheel(wheel: Path) -> None:
                 for forbidden in FORBIDDEN_TEXT:
                     if forbidden in content:
                         raise RuntimeError(f"wheel contains forbidden text {forbidden!r}: {info.filename}")
+
+
+def runtime_contract(package_root: Path) -> str:
+    sys.path.insert(0, str(ROOT / "src"))
+    from alma3.hashes import runtime_contract_sha256
+
+    return runtime_contract_sha256(package_root)
+
+
+def inspect_paired_results(jsonl: Path, csv_path: Path) -> None:
+    sys.path.insert(0, str(ROOT / "src"))
+    from alma3.clinical_result import validate_result
+    from alma3.infer import _RESULT_CSV_FIELDS, _result_csv_row
+
+    json_rows = [
+        json.loads(line)
+        for line in jsonl.read_text(encoding="utf-8").splitlines()
+    ]
+    with csv_path.open(encoding="utf-8", newline="") as handle:
+        reader = csv.DictReader(handle)
+        csv_rows = list(reader)
+    if tuple(reader.fieldnames or ()) != _RESULT_CSV_FIELDS:
+        raise RuntimeError("paired demo CSV header does not match the 44-column contract")
+    if not json_rows or len(json_rows) != len(csv_rows):
+        raise RuntimeError("paired demo outputs are empty or have different row counts")
+    for row in json_rows:
+        validate_result(row)
+    expected_csv_rows = [
+        {
+            field: "" if value == "" else str(value)
+            for field, value in _result_csv_row(row).items()
+        }
+        for row in json_rows
+    ]
+    if expected_csv_rows != csv_rows:
+        raise RuntimeError("paired JSONL and CSV demo results are inconsistent")
 
 
 def inspect_release_catalog(release: Path) -> None:
@@ -105,6 +142,7 @@ def main() -> int:
     run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], env=environment)
 
     with tempfile.TemporaryDirectory(prefix="alma3-release-gate-") as raw:
+        source_contract = runtime_contract(ROOT / "src" / "alma3")
         wheel_dir = Path(raw) / "wheel"
         wheel_dir.mkdir()
         run(
@@ -124,6 +162,14 @@ def main() -> int:
         if len(wheels) != 1:
             raise RuntimeError("release gate did not build exactly one ALMA3 3.0.0 wheel")
         inspect_wheel(wheels[0])
+        wheel_root = Path(raw) / "wheel-root"
+        with zipfile.ZipFile(wheels[0]) as archive:
+            archive.extractall(wheel_root)
+        wheel_contract = runtime_contract(wheel_root / "alma3")
+        if wheel_contract != source_contract:
+            raise RuntimeError(
+                f"wheel runtime contract differs from source: {wheel_contract} != {source_contract}"
+            )
 
         if not args.skip_docker_matrix:
             for version, image in PYTHON_IMAGES.items():
@@ -142,6 +188,8 @@ def main() -> int:
                         "0:0",
                         "--entrypoint",
                         "sh",
+                        "-e",
+                        f"ALMA3_RUNTIME_CONTRACT_SHA256={source_contract}",
                         "-v",
                         f"{wheel_dir}:/wheel:ro",
                         tag,
@@ -149,7 +197,11 @@ def main() -> int:
                         (
                             "python -m pip uninstall -y alma3 >/dev/null && "
                             "python -m pip install --no-deps /wheel/alma3-3.0.0-*.whl >/dev/null && "
-                            "alma3 --version && python -m alma3 --version"
+                            "alma3 --version && python -m alma3 --version && "
+                            "python -c 'import os; from alma3.hashes import runtime_contract_sha256; "
+                            "actual = runtime_contract_sha256(); "
+                            "expected = os.environ[\"ALMA3_RUNTIME_CONTRACT_SHA256\"]; "
+                            "assert actual == expected, (actual, expected)'"
                         ),
                     ]
                 )
@@ -175,6 +227,25 @@ def main() -> int:
                     "docker",
                     "run",
                     "--rm",
+                    "--entrypoint",
+                    "python",
+                    "-e",
+                    f"ALMA3_RUNTIME_CONTRACT_SHA256={source_contract}",
+                    "alma3:3.0.0-rc",
+                    "-c",
+                    (
+                        "import os; from alma3.hashes import runtime_contract_sha256; "
+                        "actual = runtime_contract_sha256(); "
+                        "expected = os.environ['ALMA3_RUNTIME_CONTRACT_SHA256']; "
+                        "assert actual == expected, (actual, expected)"
+                    ),
+                ]
+            )
+            run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
                     "--user",
                     "0:0",
                     "-v",
@@ -184,6 +255,25 @@ def main() -> int:
                     "-o",
                     "/out/alma3-demo.jsonl",
                 ]
+            )
+            run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--user",
+                    "0:0",
+                    "-v",
+                    f"{raw}:/out",
+                    "alma3:3.0.0-rc",
+                    "demo",
+                    "-o",
+                    "/out/alma3-demo.csv",
+                ]
+            )
+            inspect_paired_results(
+                Path(raw) / "alma3-demo.jsonl",
+                Path(raw) / "alma3-demo.csv",
             )
     print("ALMA3 release gate passed", flush=True)
     return 0
