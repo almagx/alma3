@@ -25,7 +25,7 @@ PYTHON_IMAGES = {
     "3.12": None,
 }
 DEMO_GZIP_SHA256 = "c7fd2afcba9b4830b9774cc646ccd060c7d48de9b0002fb9bebf77e551e45a37"
-DEMO_MANIFEST_SHA256 = "6f2b779c77a98d72ef8672dc345b5bead7b70c96b4ac7e34ab5284efba0fda8e"
+DEMO_MANIFEST_SHA256 = "1ee42be811e5373d28ed6a2cd8bea895ea1df574fdb1de520e2f77d13354bcee"
 DEMO_MANIFEST = "alma3/examples/example_dataset.manifest.json"
 BEDMETHYL_TARGET = "alma3/assets/alma3-3.0.0-grch38-projectable-cpgs.bed.gz"
 BEDMETHYL_TARGET_GZIP_SHA256 = "c79f88affdb2848a85741d416b7b723b5c08077ee8948962114a666cfd23b7ac"
