@@ -70,8 +70,8 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
     def test_readme_pins_the_ont_combined_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        ont = readme.split("### Oxford Nanopore: combined 5mC+5hmC", 1)[1].split(
-            "### PacBio HiFi: 5mC only", 1
+        ont = readme.split("<summary><strong>Oxford Nanopore</strong></summary>", 1)[1].split(
+            "<summary><strong>PacBio HiFi</strong></summary>", 1
         )[0]
         for required in (
             "--modified-bases 5mC 5hmC",
@@ -87,7 +87,9 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
     def test_readme_pins_the_pacbio_5mc_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        pacbio = readme.split("### PacBio HiFi: 5mC only", 1)[1].split("## Results", 1)[0]
+        pacbio = readme.split("<summary><strong>PacBio HiFi</strong></summary>", 1)[1].split(
+            "## Results", 1
+        )[0]
         for required in (
             "--pileup-mode model",
             "--modsites-mode denovo",

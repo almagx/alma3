@@ -50,11 +50,11 @@ alma3 infer -i sample.bed -o sample.alma3.csv
 | BedMethyl | `.bed` or `.bed.gz` | One GRCh38 sample per file, tab-delimited with at least 11 columns |
 
 - In array CSVs, CpG headers should look like `cg00000029`, not gene names. Supply beta values as decimals near `0` to `1`. Mild corrected excursions are accepted. Use `--input-values mvalue` for M-values. Leave missing measurements blank or `NaN`; do not replace them with zero or transpose the matrix.
-- For BedMethyl, column 4 must be `C` for combined 5mC+5hmC or `m` for 5mC. ALMA3 detects and records it automatically. Column 10 is coverage and column 11 is the modified fraction from `0` to `100`.
-- Each sample must contain at least 1,500 recognized ALMA3 CpGs. Raw IDAT and BAM files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or <a href="https://nanoporetech.github.io/modkit/intro_pileup.html">modkit</a>, or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
-- Sample IDs must be nonempty and unique, with no surrounding whitespace, ASCII control characters, or leading `=`, `+`, `-`, or `@`.
+- Raw IDAT files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
+- Each sample must contain at least 1,500 recognized ALMA3 CpGs. Sample IDs must be nonempty and unique, with no surrounding whitespace or leading `=`, `+`, `-`, or `@`.
 
-### Oxford Nanopore: combined 5mC+5hmC
+<details>
+<summary><strong>Oxford Nanopore</strong></summary>
 
 Infinium arrays cannot distinguish 5mC from 5hmC. For ONT, combine both with pinned Modkit `v0.6.3`. The BAM must be coordinate-sorted and indexed against the same chr-prefixed GRCh38 FASTA, with an adjacent `.fai`.
 
@@ -83,7 +83,10 @@ alma3 infer \
 
 The exporter verifies GRCh38 and writes the 65,535 release CpGs plus a receipt. This Modkit command produces combined 5mC+5hmC input, which ALMA3 detects automatically. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
-### PacBio HiFi: 5mC only
+</details>
+
+<details>
+<summary><strong>PacBio HiFi</strong></summary>
 
 PacBio 5mC is not equivalent to array 5mC+5hmC. Jasmine estimates 5mC and 5hmC independently, so never add or normalize their probabilities. Require standalone `C+m`; ignore separate `C+h`/`G-h`; reject compound `C+mh` and h-only input. See [Jasmine](https://github.com/PacificBiosciences/jasmine#overview) and [pb-CpG-tools](https://github.com/PacificBiosciences/pb-CpG-tools#input-alignment-file).
 
@@ -122,9 +125,11 @@ alma3 infer \
 
 For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not use count mode or `discretized_mod_score`. Filter after pileup because the model uses neighboring CpGs. The converted file uses `m`, so ALMA3 detects 5mC automatically. MethBat is not validated for ALMA3.
 
+</details>
+
 ## Results
 
-JSONL schema v2 is the canonical result. CSV is its fixed clinician-readable projection and carries the same nonredundant diagnostic and troubleshooting facts: result status, release and runtime identity, resolved device, input interpretation and clipping, CpG support, the complete reached hierarchy with per-level scores and cutoffs, and any unresolved differential. JSONL additionally retains numeric taxonomy indices and component hashes that can be resolved from the release-manifest hash recorded in CSV.
+CSV is easiest to read and share; JSONL provides the same result in a structured format for software integrations.
 
 | Result | Meaning |
 |---|---|
@@ -132,12 +137,6 @@ JSONL schema v2 is the canonical result. CSV is its fixed clinician-readable pro
 | `heme_tumor_not_detected` | No hematolymphoid tumor signal was detected. |
 | `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
 | `no_call` | Tumor presence did not reach its reporting cutoff. |
-
-`result_summary` gives the main result and confidence. If a level is unresolved, it also shows the leading candidate, its confidence, and the threshold it missed; the CSV includes both candidates.
-
-Confidence is a model score, not a diagnostic probability or guarantee. When the hierarchy determines a class automatically, confidence comes from the last model decision; that class's CSV score and threshold are blank. A fully blank level was not reached.
-
-Use CSV to review, share, or troubleshoot results; use JSONL for software integrations. Send the original CSV without opening or resaving it because spreadsheet software can alter IDs and numbers.
 
 ## Python
 
@@ -189,7 +188,7 @@ TBD
 
 ## Support
 
-Questions or feedback: <a href="mailto:support@almagx.com">support@almagx.com</a>.
+Questions or feedback: email <a href="mailto:support@almagx.com">support@almagx.com</a> or [open an issue](https://github.com/almagx/alma3/issues).
 
 ## License
 
