@@ -135,13 +135,11 @@ JSONL schema v2 is the canonical result. CSV is its fixed clinician-readable pro
 | `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
 | `no_call` | Tumor presence did not reach its reporting cutoff. |
 
-`result_summary` states the accepted call and confidence, when present. Unresolved results also state the leading candidate, its confidence, and threshold; both candidates remain in the differential fields.
+`result_summary` gives the main result and confidence. If a level is unresolved, it also shows the leading candidate, its confidence, and the threshold it missed; the CSV includes both candidates.
 
-Confidence is `100 ×` the parent-conditioned model score, not patient probability, predictive value, or diagnostic certainty. Implied calls use their deepest scored ancestor's confidence; their score and cutoff stay blank. A leading candidate remains unresolved because its confidence is below threshold. Summaries round to one decimal; structured values remain unrounded.
+Confidence is a model score, not a diagnostic probability or guarantee. When the hierarchy determines a class automatically, confidence comes from the last model decision; that class's CSV score and threshold are blank. A fully blank level was not reached.
 
-Column order is result, differential, CpG/input, hierarchy, provenance. Scored levels fill classification, status, score, and cutoff; implied levels omit score and cutoff; unreached levels are blank. Decision fields are populated only when unresolved. `input_modification_mode` is set for BedMethyl and blank for arrays.
-
-For support, send the original CSV without opening or resaving it; spreadsheet software can alter IDs and precision.
+Use CSV to review, share, or troubleshoot results; use JSONL for software integrations. Send the original CSV without opening or resaving it because spreadsheet software can alter IDs and numbers.
 
 ## Python
 
