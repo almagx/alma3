@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import json
 import math
+import re
 import runpy
 import shutil
 import subprocess
@@ -13,7 +14,7 @@ import tempfile
 import unittest
 import warnings
 from contextlib import redirect_stderr
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -646,19 +647,57 @@ class RuntimeContractTests(unittest.TestCase):
                 ],
             )
 
-    def test_demo_is_the_exact_v2_dataset(self) -> None:
-        digest = hashlib.sha256()
-        with gzip.open(demo_path(), "rb") as handle:
-            for block in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(block)
-        self.assertEqual(digest.hexdigest(), "172ddb11f799ccc7952c5f4a86e8babefba99a685e92ec014a46a531b49227a6")
-        with gzip.open(demo_path(), "rt", encoding="utf-8", newline="") as handle:
-            reader = csv.reader(handle)
-            header = next(reader)
-            rows = list(reader)
-        self.assertEqual(len(header) - 1, 331556)
-        self.assertEqual(len(rows), 10)
+    def test_demo_matches_its_release_bound_manifest(self) -> None:
+        path = demo_path()
+        payload = path.read_bytes()
+        manifest_path = path.with_name("example_dataset.manifest.json")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            hashlib.sha256(payload).hexdigest(),
+            "c7fd2afcba9b4830b9774cc646ccd060c7d48de9b0002fb9bebf77e551e45a37",
+        )
+        self.assertEqual(
+            hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            "6f2b779c77a98d72ef8672dc345b5bead7b70c96b4ac7e34ab5284efba0fda8e",
+        )
+        self.assertEqual(manifest["kind"], "alma3_demo_dataset_manifest")
+        self.assertEqual(manifest["dataset"]["compressed_bytes"], len(payload))
+        self.assertLessEqual(len(payload), 2_500_000)
+        decompressed = gzip.decompress(payload)
+        self.assertEqual(
+            hashlib.sha256(decompressed).hexdigest(),
+            manifest["dataset"]["decompressed_sha256"],
+        )
+        rebuilt = BytesIO()
+        with gzip.GzipFile(filename="", fileobj=rebuilt, mode="wb", compresslevel=9, mtime=0) as handle:
+            handle.write(decompressed)
+        self.assertEqual(rebuilt.getvalue(), payload)
+        reader = csv.reader(StringIO(decompressed.decode("utf-8"), newline=""))
+        header = next(reader)
+        rows = list(reader)
+        expected_ids = [f"demo_{index:02d}" for index in range(1, 17)]
+        self.assertEqual(header[0], "sample_id")
+        self.assertEqual(len(header) - 1, 65_536)
+        self.assertEqual(len(set(header[1:])), 65_536)
+        self.assertEqual([row[0] for row in rows], expected_ids)
         self.assertTrue(all(len(row) == len(header) for row in rows))
+        self.assertEqual(
+            [sum(value != "" for value in row[1:]) for row in rows],
+            [sample["observed_cpg_count"] for sample in manifest["samples"]],
+        )
+        self.assertTrue(
+            all(value == "" or 0.0 <= float(value) <= 1.0 for row in rows for value in row[1:])
+        )
+        public_text = decompressed.decode("utf-8") + manifest_path.read_text(encoding="utf-8")
+        self.assertIsNone(re.search(r"(?:GSE|GSM|E-MTAB-)[0-9]+", public_text, flags=re.IGNORECASE))
+        accepted = {sample["accepted_classification"] for sample in manifest["samples"]}
+        self.assertTrue(
+            {
+                "Blastic plasmacytoid dendritic cell neoplasm",
+                "Follicular dendritic cell sarcoma",
+                "Rosai-Dorfman disease",
+            }.issubset(accepted)
+        )
 
     def test_embedding_api_and_forward_are_exactly_equivalent(self) -> None:
         config = foundation_config()
@@ -1192,12 +1231,15 @@ class RuntimeContractTests(unittest.TestCase):
                 None,
                 demo_path(),
                 "array-csv",
-                "alma3-demo.jsonl",
+                "alma3-demo.csv",
                 device="auto",
                 batch_size=2,
                 input_values="beta",
                 progress=False,
             )
+            run.reset_mock()
+            self.assertEqual(demo_main(["-o", "custom.jsonl"]), 0)
+            self.assertEqual(run.call_args.args[3], "custom.jsonl")
 
 
 if __name__ == "__main__":

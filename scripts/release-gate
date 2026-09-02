@@ -5,8 +5,10 @@ import argparse
 import csv
 import gzip
 import hashlib
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,7 +24,9 @@ PYTHON_IMAGES = {
     "3.11": "python:3.11-slim-bookworm",
     "3.12": None,
 }
-DEMO_SHA256 = "172ddb11f799ccc7952c5f4a86e8babefba99a685e92ec014a46a531b49227a6"
+DEMO_GZIP_SHA256 = "c7fd2afcba9b4830b9774cc646ccd060c7d48de9b0002fb9bebf77e551e45a37"
+DEMO_MANIFEST_SHA256 = "6f2b779c77a98d72ef8672dc345b5bead7b70c96b4ac7e34ab5284efba0fda8e"
+DEMO_MANIFEST = "alma3/examples/example_dataset.manifest.json"
 BEDMETHYL_TARGET = "alma3/assets/alma3-3.0.0-grch38-projectable-cpgs.bed.gz"
 BEDMETHYL_TARGET_GZIP_SHA256 = "c79f88affdb2848a85741d416b7b723b5c08077ee8948962114a666cfd23b7ac"
 BEDMETHYL_TARGET_SHA256 = "3e6feef17fc4813caf4186c63d63165e7ddb77a0c3b31c93a2a33ddf6eec916a"
@@ -41,6 +45,15 @@ def inspect_wheel(wheel: Path) -> None:
             raise RuntimeError("wheel is missing the PEP 561 marker")
         if "alma3/examples/example_dataset.csv.gz" not in names:
             raise RuntimeError("wheel is missing the packaged demo")
+        if DEMO_MANIFEST not in names:
+            raise RuntimeError("wheel is missing the packaged demo manifest")
+        if (
+            hashlib.sha256(archive.read("alma3/examples/example_dataset.csv.gz")).hexdigest()
+            != DEMO_GZIP_SHA256
+        ):
+            raise RuntimeError("wheel demo SHA-256 mismatch")
+        if hashlib.sha256(archive.read(DEMO_MANIFEST)).hexdigest() != DEMO_MANIFEST_SHA256:
+            raise RuntimeError("wheel demo manifest SHA-256 mismatch")
         if BEDMETHYL_TARGET not in names:
             raise RuntimeError("wheel is missing the release-bound BedMethyl target")
         target_gzip = archive.read(BEDMETHYL_TARGET)
@@ -72,7 +85,7 @@ def runtime_contract(package_root: Path) -> str:
     return runtime_contract_sha256(package_root)
 
 
-def inspect_paired_results(jsonl: Path, csv_path: Path) -> None:
+def inspect_paired_results(jsonl: Path, csv_path: Path, manifest_path: Path | None = None) -> None:
     sys.path.insert(0, str(ROOT / "src"))
     from alma3.clinical_result import validate_result
     from alma3.infer import _RESULT_CSV_FIELDS, _result_csv_row
@@ -99,6 +112,29 @@ def inspect_paired_results(jsonl: Path, csv_path: Path) -> None:
     ]
     if expected_csv_rows != csv_rows:
         raise RuntimeError("paired JSONL and CSV demo results are inconsistent")
+    if manifest_path is None:
+        return
+    expected = json.loads(manifest_path.read_text(encoding="utf-8"))["samples"]
+    observed = [
+        {
+            "sample_id": row["sample_id"],
+            "observed_cpg_count": row["observed_cpg_count"],
+            "expected_status": row["status"],
+            "accepted_level": None if row["accepted"] is None else row["accepted"]["level"],
+            "accepted_classification": (
+                None if row["accepted"] is None else row["accepted"]["classification"]
+            ),
+            "unresolved_level": None if row["decision"] is None else row["decision"]["level"],
+            "result_summary": row["result_summary"],
+        }
+        for row in json_rows
+    ]
+    expected = [
+        {key: value for key, value in row.items() if key != "selection_role"}
+        for row in expected
+    ]
+    if observed != expected:
+        raise RuntimeError("demo results disagree with the packaged manifest")
 
 
 def inspect_release_catalog(release: Path) -> None:
@@ -115,34 +151,74 @@ def inspect_demo(release: Path) -> None:
     from alma3.infer import _array_csv_batches, demo_path
     from alma3.release import validate_release
 
-    digest = hashlib.sha256()
-    with gzip.open(demo_path(), "rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    if digest.hexdigest() != DEMO_SHA256:
-        raise RuntimeError("packaged demo does not match the ALMA v2 dataset")
-
     validated = validate_release(release, device="cpu", load_model=False)
-    with gzip.open(demo_path(), "rt", encoding="utf-8", newline="") as handle:
-        header = next(csv.reader(handle))
-    recognized = len(set(header[1:]) & set(validated["cpg"].cpg_ids))
-    if recognized != 48_478:
-        raise RuntimeError(f"packaged demo matches {recognized} release CpGs; expected 48478")
-    summaries = [
-        summary
-        for *_batch, summary in _array_csv_batches(
+    path = demo_path()
+    manifest_path = path.with_name("example_dataset.manifest.json")
+    payload = path.read_bytes()
+    if hashlib.sha256(payload).hexdigest() != DEMO_GZIP_SHA256:
+        raise RuntimeError("packaged demo gzip SHA-256 mismatch")
+    if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != DEMO_MANIFEST_SHA256:
+        raise RuntimeError("packaged demo manifest SHA-256 mismatch")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest["kind"] != "alma3_demo_dataset_manifest" or manifest["schema_version"] != 1:
+        raise RuntimeError("packaged demo manifest contract is invalid")
+    dataset = manifest["dataset"]
+    if (
+        dataset["compressed_sha256"] != DEMO_GZIP_SHA256
+        or dataset["compressed_bytes"] != len(payload)
+        or dataset["sample_count"] != 16
+        or dataset["cpg_count"] != 65_536
+        or len(payload) > 2_500_000
+    ):
+        raise RuntimeError("packaged demo metadata is invalid")
+    with gzip.GzipFile(fileobj=io.BytesIO(payload), mode="rb") as handle:
+        decompressed = handle.read()
+    if hashlib.sha256(decompressed).hexdigest() != dataset["decompressed_sha256"]:
+        raise RuntimeError("packaged demo decompressed SHA-256 mismatch")
+    deterministic = io.BytesIO()
+    with gzip.GzipFile(filename="", fileobj=deterministic, mode="wb", compresslevel=9, mtime=0) as handle:
+        handle.write(decompressed)
+    if deterministic.getvalue() != payload:
+        raise RuntimeError("packaged demo gzip is not deterministic")
+    expected_release = {
+        "version": validated["release"]["version"],
+        "manifest_sha256": validated["manifest_sha256"],
+        "model_sha256": validated["hashes"]["model.safetensors"],
+        "taxonomy_sha256": validated["hashes"]["taxonomy.json"],
+        "cpg_manifest_sha256": validated["hashes"]["cpg_manifest.json"],
+        "thresholds_sha256": validated["hashes"]["thresholds.json"],
+    }
+    if manifest["release"] != expected_release:
+        raise RuntimeError("packaged demo is bound to a different release")
+    reader = csv.reader(io.StringIO(decompressed.decode("utf-8"), newline=""))
+    header = next(reader)
+    rows = list(reader)
+    if header != ["sample_id", *validated["cpg"].cpg_ids]:
+        raise RuntimeError("packaged demo CpG columns do not match the release")
+    expected_ids = [f"demo_{index:02d}" for index in range(1, 17)]
+    if [row[0] for row in rows] != expected_ids or any(len(row) != len(header) for row in rows):
+        raise RuntimeError("packaged demo sample rows are invalid")
+    parsed = []
+    for sample_ids, _, observed, summary in _array_csv_batches(
             demo_path(),
             validated["cpg"],
             input_values="beta",
             minimum_observed_cpgs=int(validated["thresholds"]["minimum_observed_cpgs"]),
+        ):
+        parsed.extend(
+            (sample_id, int(mask.sum().item()), clipped)
+            for sample_id, mask, clipped in zip(
+                sample_ids, observed, summary.clipped_by_sample, strict=True
+            )
         )
-    ]
-    observed = sum(summary.observed for summary in summaries)
-    clipped = sum(summary.clipped for summary in summaries)
-    if (observed, clipped) != (484_780, 5_012):
-        raise RuntimeError(
-            f"packaged demo adjustment is {(observed, clipped)}; expected (484780, 5012)"
-        )
+    expected_counts = [row["observed_cpg_count"] for row in manifest["samples"]]
+    if [sample_id for sample_id, _, _ in parsed] != expected_ids:
+        raise RuntimeError("packaged demo parser changed sample order")
+    if [count for _, count, _ in parsed] != expected_counts or any(clipped for _, _, clipped in parsed):
+        raise RuntimeError("packaged demo coverage or clipping disagrees with its manifest")
+    public_text = decompressed.decode("utf-8") + manifest_path.read_text(encoding="utf-8")
+    if re.search(r"(?:GSE|GSM|E-MTAB-)[0-9]+", public_text, flags=re.IGNORECASE):
+        raise RuntimeError("packaged demo exposes a source accession")
 
 
 def main() -> int:
@@ -266,12 +342,12 @@ def main() -> int:
                     "--rm",
                     "--user",
                     output_user,
+                    "--workdir",
+                    "/out",
                     "-v",
                     f"{raw}:/out",
                     "alma3:3.0.0-rc",
                     "demo",
-                    "-o",
-                    "/out/alma3-demo.jsonl",
                 ]
             )
             run(
@@ -286,12 +362,13 @@ def main() -> int:
                     "alma3:3.0.0-rc",
                     "demo",
                     "-o",
-                    "/out/alma3-demo.csv",
+                    "/out/alma3-demo.jsonl",
                 ]
             )
             inspect_paired_results(
                 Path(raw) / "alma3-demo.jsonl",
                 Path(raw) / "alma3-demo.csv",
+                ROOT / "src" / "alma3" / "examples" / "example_dataset.manifest.json",
             )
     print("ALMA3 release gate passed", flush=True)
     return 0

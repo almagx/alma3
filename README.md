@@ -34,6 +34,8 @@ pip install alma3
 alma3 demo
 ```
 
+This writes `alma3-demo.csv` with 16 examples spanning common and rare diagnoses, unresolved results, and different array generations.
+
 Run your own sample:
 
 ```bash

@@ -1,0 +1,186 @@
+{
+  "dataset": {
+    "compressed_bytes": 1610244,
+    "compressed_sha256": "c7fd2afcba9b4830b9774cc646ccd060c7d48de9b0002fb9bebf77e551e45a37",
+    "cpg_count": 65536,
+    "decompressed_sha256": "d27bc8d48569b7fec56f16a484ab1296f74894ed36e630b80819fa51189cc0d7",
+    "file": "example_dataset.csv.gz",
+    "missing_value": "",
+    "sample_count": 16,
+    "sample_id_header": "sample_id",
+    "value_mode": "beta"
+  },
+  "kind": "alma3_demo_dataset_manifest",
+  "purpose": "This dataset is a functional demonstration of ALMA3 input and output behavior. It is not validation evidence or a performance benchmark.",
+  "release": {
+    "cpg_manifest_sha256": "404f4fa5eaf6bc26eea2231d83b0463430fbbfba31f5a6d11f698a2f9ca05935",
+    "manifest_sha256": "275049bea143968c1bd38563f272e3277ed4dfe9b99f31378b51b44120acb385",
+    "model_sha256": "ea5b028cafb62dd2be1dfcce879d53dc835265d2b3e082ce1c104c100eaff010",
+    "taxonomy_sha256": "202f239d5fcb7c52e3d144c29f5accfec3e740dd9d98ae93fe35d5398836f65a",
+    "thresholds_sha256": "9532f0c2fb8b03311dcd6de06458cb58380cd1ccd38ac89d0245545a8fc40c62",
+    "version": "3.0.0"
+  },
+  "samples": [
+    {
+      "accepted_classification": "absent",
+      "accepted_level": "presence",
+      "expected_status": "heme_tumor_not_detected",
+      "observed_cpg_count": 61790,
+      "result_summary": "Tumor not detected (99.5% confidence).",
+      "sample_id": "demo_01",
+      "selection_role": "tumor_not_detected_dense",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "absent",
+      "accepted_level": "presence",
+      "expected_status": "heme_tumor_not_detected",
+      "observed_cpg_count": 4024,
+      "result_summary": "Tumor not detected (99.5% confidence).",
+      "sample_id": "demo_02",
+      "selection_role": "tumor_not_detected_sparse",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": null,
+      "accepted_level": null,
+      "expected_status": "no_call",
+      "observed_cpg_count": 63341,
+      "result_summary": "Tumor presence unresolved. Leading candidate: present (75.4% confidence; threshold 80.7%).",
+      "sample_id": "demo_03",
+      "selection_role": "no_call",
+      "unresolved_level": "presence"
+    },
+    {
+      "accepted_classification": "Mature B-cell neoplasms",
+      "accepted_level": "family",
+      "expected_status": "partially_resolved",
+      "observed_cpg_count": 46359,
+      "result_summary": "Family: Mature B-cell neoplasms (97.9% confidence). Type unresolved. Leading candidate: Marginal zone lymphoma (56.9% confidence; threshold 60.9%).",
+      "sample_id": "demo_04",
+      "selection_role": "partially_resolved_type",
+      "unresolved_level": "type"
+    },
+    {
+      "accepted_classification": "Acute myeloid leukaemia",
+      "accepted_level": "type",
+      "expected_status": "partially_resolved",
+      "observed_cpg_count": 30168,
+      "result_summary": "Type: Acute myeloid leukaemia (98.2% confidence). Subtype unresolved. Leading candidate: AML with ETV6 fusion (21.4% confidence; threshold 85.1%).",
+      "sample_id": "demo_05",
+      "selection_role": "partially_resolved_subtype",
+      "unresolved_level": "subtype"
+    },
+    {
+      "accepted_classification": "B-lymphoblastic leukaemias/lymphomas",
+      "accepted_level": "type",
+      "expected_status": "partially_resolved",
+      "observed_cpg_count": 63284,
+      "result_summary": "Type: B-lymphoblastic leukaemias/lymphomas (98.5% confidence). Subtype unresolved. Leading candidate: B-ALL with MYC-r (69.0% confidence; threshold 85.1%).",
+      "sample_id": "demo_06",
+      "selection_role": "partially_resolved_subtype",
+      "unresolved_level": "subtype"
+    },
+    {
+      "accepted_classification": "Myeloproliferative neoplasms",
+      "accepted_level": "type",
+      "expected_status": "partially_resolved",
+      "observed_cpg_count": 4024,
+      "result_summary": "Type: Myeloproliferative neoplasms (97.5% confidence). Subtype unresolved. Leading candidate: Essential thrombocythaemia (57.3% confidence; threshold 85.1%).",
+      "sample_id": "demo_07",
+      "selection_role": "partially_resolved_subtype",
+      "unresolved_level": "subtype"
+    },
+    {
+      "accepted_classification": "ALK-positive ALCL",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 64782,
+      "result_summary": "Subtype: ALK-positive ALCL (92.8% confidence).",
+      "sample_id": "demo_08",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "Blastic plasmacytoid dendritic cell neoplasm",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 40332,
+      "result_summary": "Subtype: Blastic plasmacytoid dendritic cell neoplasm (98.3% confidence).",
+      "sample_id": "demo_09",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "EBV-positive Burkitt lymphoma",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 65053,
+      "result_summary": "Subtype: EBV-positive Burkitt lymphoma (92.5% confidence).",
+      "sample_id": "demo_10",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "Follicular dendritic cell sarcoma",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 53493,
+      "result_summary": "Subtype: Follicular dendritic cell sarcoma (98.1% confidence).",
+      "sample_id": "demo_11",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "Follicular lymphoma",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 65323,
+      "result_summary": "Subtype: Follicular lymphoma (96.0% confidence).",
+      "sample_id": "demo_12",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "Plasma cell myeloma/multiple myeloma",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 4023,
+      "result_summary": "Subtype: Plasma cell myeloma/multiple myeloma (94.5% confidence).",
+      "sample_id": "demo_13",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "Primary LBCL of immune-privileged sites",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 65403,
+      "result_summary": "Subtype: Primary LBCL of immune-privileged sites (92.7% confidence).",
+      "sample_id": "demo_14",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "Rosai-Dorfman disease",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 53886,
+      "result_summary": "Subtype: Rosai-Dorfman disease (94.4% confidence).",
+      "sample_id": "demo_15",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    },
+    {
+      "accepted_classification": "Undifferentiated pleomorphic sarcoma",
+      "accepted_level": "subtype",
+      "expected_status": "fully_resolved",
+      "observed_cpg_count": 49013,
+      "result_summary": "Subtype: Undifferentiated pleomorphic sarcoma (94.0% confidence).",
+      "sample_id": "demo_16",
+      "selection_role": "fully_resolved",
+      "unresolved_level": null
+    }
+  ],
+  "schema_version": 1
+}

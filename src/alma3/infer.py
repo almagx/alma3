@@ -804,7 +804,7 @@ def demo_main(argv: list[str] | None = None) -> int:
         "--artifact",
         help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
     )
-    parser.add_argument("-o", "--output", default="alma3-demo.jsonl", help="new demo JSONL output file")
+    parser.add_argument("-o", "--output", default="alma3-demo.csv", help="new demo CSV or JSONL output file")
     parser.add_argument("--device", default="auto", help="inference device: auto, cpu, cuda, or cuda:<index>")
     args = parser.parse_args(argv)
     progress = sys.stderr.isatty()
