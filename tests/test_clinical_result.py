@@ -211,11 +211,11 @@ class ClinicalResultContractTests(unittest.TestCase):
         taxonomy = _taxonomy()
         expected_summaries = {
             "presence": (
-                "Tumor presence unresolved. Leading candidate: absent "
+                "Hematolymphoid tumor presence unresolved. Leading candidate: absent "
                 "(59.9% confidence; threshold 80.0%)."
             ),
             "lineage": (
-                "Tumor detected (100.0% confidence). Lineage unresolved. "
+                "Hematolymphoid tumor detected (100.0% confidence). Lineage unresolved. "
                 "Leading candidate: myeloid (59.9% confidence; threshold 80.0%)."
             ),
             "family": (
@@ -310,7 +310,7 @@ class ClinicalResultContractTests(unittest.TestCase):
         )
         self.assertEqual(
             result["result_summary"],
-            "Tumor presence unresolved. Leading candidate: absent "
+            "Hematolymphoid tumor presence unresolved. Leading candidate: absent "
             "(50.0% confidence; threshold 80.0%).",
         )
 
@@ -440,7 +440,7 @@ class ClinicalResultContractTests(unittest.TestCase):
         absent_row = _result_csv_row(tumor_absent)
         self.assertEqual(
             absent_row["result_summary"],
-            "Tumor not detected (100.0% confidence).",
+            "Hematolymphoid tumor not detected (100.0% confidence).",
         )
         self.assertEqual(absent_row["resolved_classification"], "absent")
         self.assertEqual(absent_row["lineage"], "")
@@ -472,7 +472,7 @@ class ClinicalResultContractTests(unittest.TestCase):
         no_call_row = _result_csv_row(no_call)
         self.assertEqual(
             no_call_row["result_summary"],
-            "Tumor presence unresolved. Leading candidate: absent "
+            "Hematolymphoid tumor presence unresolved. Leading candidate: absent "
             "(59.9% confidence; threshold 80.0%).",
         )
         self.assertEqual(no_call_row["resolved_classification"], "")
@@ -582,6 +582,29 @@ class ClinicalResultContractTests(unittest.TestCase):
         schema_v1["schema_version"] = 1
         with self.assertRaisesRegex(DxContractError, "schema version is invalid"):
             validate_result(schema_v1)
+
+    def test_ambiguous_tumor_presence_summaries_fail_closed(self) -> None:
+        cases = (
+            (
+                _result(tumor_absent=True),
+                "Tumor not detected (100.0% confidence).",
+            ),
+            (
+                _result(unresolved_level="presence"),
+                "Tumor presence unresolved. Leading candidate: absent "
+                "(59.9% confidence; threshold 80.0%).",
+            ),
+            (
+                _result(unresolved_level="lineage"),
+                "Tumor detected (100.0% confidence). Lineage unresolved. "
+                "Leading candidate: myeloid (59.9% confidence; threshold 80.0%).",
+            ),
+        )
+        for result, legacy_summary in cases:
+            with self.subTest(status=result["status"]):
+                result["result_summary"] = legacy_summary
+                with self.assertRaisesRegex(DxContractError, "summary is invalid"):
+                    validate_result(result)
 
     def test_runtime_input_and_sample_id_contracts_fail_closed(self) -> None:
         result = _result()

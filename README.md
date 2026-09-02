@@ -145,7 +145,7 @@ CSV is easiest to read and share; JSONL provides the same result in a structured
 | `fully_resolved` | The applicable hierarchy was fully resolved. |
 | `heme_tumor_not_detected` | No hematolymphoid tumor signal was detected. |
 | `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
-| `no_call` | Tumor presence did not reach its reporting cutoff. |
+| `no_call` | Hematolymphoid tumor presence did not reach its reporting cutoff. |
 
 </details>
 

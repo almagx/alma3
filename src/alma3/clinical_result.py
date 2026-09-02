@@ -41,7 +41,7 @@ _RELEASE_FIELDS = {"version", *_RELEASE_HASH_FIELDS}
 _RUNTIME_FIELDS = {"package_version", "contract_sha256", "device"}
 _INPUT_FIELDS = {"format", "value_mode", "clipped_value_count"}
 _LEVEL_DISPLAY = {
-    "presence": "tumor presence",
+    "presence": "hematolymphoid tumor presence",
     "lineage": "lineage",
     "family": "family",
     "type": "type",
@@ -81,17 +81,17 @@ def _result_summary(result: dict[str, Any]) -> str:
             f"threshold {float(decision['reporting_cutoff']) * 100.0:.1f}%)."
         )
     if status == "no_call":
-        return f"Tumor presence unresolved. {leading_candidate}"
+        return f"Hematolymphoid tumor presence unresolved. {leading_candidate}"
 
     accepted = result["accepted"]
     scored_node = next(node for node in reversed(result["path"]) if node["status"] == "resolved")
     scored_confidence = float(scored_node["model_score"]) * 100.0
     if status == "heme_tumor_not_detected":
-        return f"Tumor not detected ({scored_confidence:.1f}% confidence)."
+        return f"Hematolymphoid tumor not detected ({scored_confidence:.1f}% confidence)."
 
     evidence = f"{scored_confidence:.1f}% confidence"
     if accepted["level"] == "presence":
-        summary = f"Tumor detected ({evidence})."
+        summary = f"Hematolymphoid tumor detected ({evidence})."
     else:
         level = _LEVEL_DISPLAY[accepted["level"]].capitalize()
         summary = f"{level}: {accepted['classification']} ({evidence})."

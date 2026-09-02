@@ -658,7 +658,7 @@ class RuntimeContractTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-            "6f2b779c77a98d72ef8672dc345b5bead7b70c96b4ac7e34ab5284efba0fda8e",
+            "1ee42be811e5373d28ed6a2cd8bea895ea1df574fdb1de520e2f77d13354bcee",
         )
         self.assertEqual(manifest["kind"], "alma3_demo_dataset_manifest")
         self.assertEqual(manifest["dataset"]["compressed_bytes"], len(payload))

@@ -26,7 +26,7 @@
       "accepted_level": "presence",
       "expected_status": "heme_tumor_not_detected",
       "observed_cpg_count": 61790,
-      "result_summary": "Tumor not detected (99.5% confidence).",
+      "result_summary": "Hematolymphoid tumor not detected (99.5% confidence).",
       "sample_id": "demo_01",
       "selection_role": "tumor_not_detected_dense",
       "unresolved_level": null
@@ -36,7 +36,7 @@
       "accepted_level": "presence",
       "expected_status": "heme_tumor_not_detected",
       "observed_cpg_count": 4024,
-      "result_summary": "Tumor not detected (99.5% confidence).",
+      "result_summary": "Hematolymphoid tumor not detected (99.5% confidence).",
       "sample_id": "demo_02",
       "selection_role": "tumor_not_detected_sparse",
       "unresolved_level": null
@@ -46,7 +46,7 @@
       "accepted_level": null,
       "expected_status": "no_call",
       "observed_cpg_count": 63341,
-      "result_summary": "Tumor presence unresolved. Leading candidate: present (75.4% confidence; threshold 80.7%).",
+      "result_summary": "Hematolymphoid tumor presence unresolved. Leading candidate: present (75.4% confidence; threshold 80.7%).",
       "sample_id": "demo_03",
       "selection_role": "no_call",
       "unresolved_level": "presence"
