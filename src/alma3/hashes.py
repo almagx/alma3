@@ -9,6 +9,7 @@ from pathlib import Path
 _RUNTIME_CONTRACT_REQUIRED_FILES = (
     "__init__.py",
     "release_catalog.json",
+    "assets/alma3-3.0.0-grch38-projectable-cpgs.bed.gz",
     "schemas/dx_result.schema.json",
     "schemas/embedding_sidecar.schema.json",
     "schemas/release.schema.json",
@@ -46,6 +47,7 @@ def runtime_contract_sha256(package_root: str | Path | None = None) -> str:
     paths = {
         *python_paths,
         *(root / "schemas").glob("*.json"),
+        *(root / "assets").glob("*.bed.gz"),
         root / "release_catalog.json",
     }
     manifest = {

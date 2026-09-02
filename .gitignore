@@ -22,5 +22,6 @@ data/
 !src/alma3/examples/example_dataset.csv.gz
 *.bed
 *.bed.gz
+!src/alma3/assets/alma3-3.0.0-grch38-projectable-cpgs.bed.gz
 !tests/fixtures/*.csv
 !tests/fixtures/*.json

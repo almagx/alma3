@@ -23,6 +23,10 @@ PYTHON_IMAGES = {
     "3.12": None,
 }
 DEMO_SHA256 = "172ddb11f799ccc7952c5f4a86e8babefba99a685e92ec014a46a531b49227a6"
+BEDMETHYL_TARGET = "alma3/assets/alma3-3.0.0-grch38-projectable-cpgs.bed.gz"
+BEDMETHYL_TARGET_GZIP_SHA256 = "c79f88affdb2848a85741d416b7b723b5c08077ee8948962114a666cfd23b7ac"
+BEDMETHYL_TARGET_SHA256 = "3e6feef17fc4813caf4186c63d63165e7ddb77a0c3b31c93a2a33ddf6eec916a"
+BEDMETHYL_TARGET_CPG_COUNT = 65_535
 
 
 def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
@@ -37,6 +41,19 @@ def inspect_wheel(wheel: Path) -> None:
             raise RuntimeError("wheel is missing the PEP 561 marker")
         if "alma3/examples/example_dataset.csv.gz" not in names:
             raise RuntimeError("wheel is missing the packaged demo")
+        if BEDMETHYL_TARGET not in names:
+            raise RuntimeError("wheel is missing the release-bound BedMethyl target")
+        target_gzip = archive.read(BEDMETHYL_TARGET)
+        if hashlib.sha256(target_gzip).hexdigest() != BEDMETHYL_TARGET_GZIP_SHA256:
+            raise RuntimeError("wheel BedMethyl target gzip SHA-256 mismatch")
+        try:
+            target = gzip.decompress(target_gzip)
+        except (OSError, EOFError) as error:
+            raise RuntimeError("wheel BedMethyl target is not valid gzip") from error
+        if hashlib.sha256(target).hexdigest() != BEDMETHYL_TARGET_SHA256:
+            raise RuntimeError("wheel BedMethyl target SHA-256 mismatch")
+        if len(target.splitlines()) != BEDMETHYL_TARGET_CPG_COUNT:
+            raise RuntimeError("wheel BedMethyl target row count mismatch")
         for info in archive.infolist():
             name = info.filename.lower()
             if Path(name).suffix in FORBIDDEN_NAMES:

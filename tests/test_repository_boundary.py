@@ -24,6 +24,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
             {
                 "__init__.py",
                 "__main__.py",
+                "bedmethyl_target.py",
                 "cli.py",
                 "clinical_result.py",
                 "config.py",

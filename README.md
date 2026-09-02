@@ -54,17 +54,33 @@ alma3 infer -i sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc -o sample.
 - Each sample must contain at least 1,500 recognized ALMA3 CpGs. Raw IDAT and BAM files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or <a href="https://nanoporetech.github.io/modkit/intro_pileup.html">modkit</a>, or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
 - Sample IDs must be nonempty and unique, with no surrounding whitespace, ASCII control characters, or leading `=`, `+`, `-`, or `@`.
 
-Standard Infinium bisulfite chemistry does not distinguish 5mC from 5hmC. Prepare array-comparable ONT input with pinned Modkit `v0.6.3` and one combined row per CpG:
+Standard Infinium bisulfite chemistry does not distinguish 5mC from 5hmC. Prepare array-comparable ONT input with pinned Modkit `v0.6.3`, its [targeting behavior](https://nanoporetech.github.io/modkit/intro_include_bed.html), and one combined row per CpG. The BAM must be coordinate-sorted and indexed against the same chr-prefixed GRCh38 FASTA supplied to Modkit; the FASTA must have an adjacent `.fai`.
 
 ```bash
-modkit pileup input.bam output.bed \
-  --modified-bases 5mC 5hmC \
-  --combine-mods \
-  --cpg \
-  --combine-strands \
-  --no-filtering \
-  --ref GRCh38.fa
+alma3 export-bedmethyl-target \
+  --reference "$PWD/GRCh38.fa" \
+  --output "$PWD/alma3-3.0.0-grch38-cpgs.bed"
+
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" \
+  ontresearch/modkit@sha256:d9b966437381cdd61ddf8f0f66a88615d800495ab202e586088f0431e8f56929 \
+  modkit pileup /work/input.bam /work/sample.bed \
+    --modified-bases 5mC 5hmC \
+    --combine-mods \
+    --cpg \
+    --combine-strands \
+    --no-filtering \
+    --include-bed /work/alma3-3.0.0-grch38-cpgs.bed \
+    --ref /work/GRCh38.fa
+
+alma3 infer \
+  -i sample.bed \
+  --bedmethyl-modification-mode 5mc_plus_5hmc \
+  -o sample.alma3.csv
 ```
+
+The exporter validates chr1-chr22 and chrX GRCh38 lengths, confirms all 65,535 release-projectable intervals are CpGs, and writes a provenance receipt. The target is a deterministic export of the compressed target bundled with ALMA3. See the pinned [Modkit v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
 Use `5mc` only for an explicitly 5mC-only BedMethyl projection, including the supported PacBio route. The mode is required and has no fallback.
 
@@ -126,7 +142,8 @@ The standalone image includes the model and runs on CPU:
 
 ```bash
 docker run --rm -v "$PWD:/work" alma3:3.0.0 \
-  infer -i /work/sample.bed -o /work/sample.alma3.jsonl
+  infer -i /work/sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc \
+  -o /work/sample.alma3.jsonl
 ```
 
 ## Point-and-click automatic analysis

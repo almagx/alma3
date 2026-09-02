@@ -14,6 +14,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("demo", help="run the packaged example", add_help=False)
     sub.add_parser("download", help="download and verify the ALMA3 3.0.0 model", add_help=False)
     sub.add_parser("verify-release", help="verify an ALMA3 release artifact", add_help=False)
+    sub.add_parser(
+        "export-bedmethyl-target",
+        help="export the verified ALMA3 3.0.0 GRCh38 Modkit target",
+        add_help=False,
+    )
     args, rest = parser.parse_known_args(argv)
     try:
         if args.command == "infer":
@@ -32,6 +37,10 @@ def main(argv: list[str] | None = None) -> int:
             from .release import main as verify_release_main
 
             return verify_release_main(rest)
+        if args.command == "export-bedmethyl-target":
+            from .bedmethyl_target import main as export_bedmethyl_target_main
+
+            return export_bedmethyl_target_main(rest)
     except (OSError, RuntimeError, ValueError) as error:
         print(f"alma3: error: {error}", file=sys.stderr)
         return 2

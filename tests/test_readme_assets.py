@@ -5,7 +5,6 @@ import json
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "assets/alma3-a3-motion-readme.json"
 SOURCE_COMMIT = "69821c8a02a8aec48bf86ad0c7b93ada4340851c"

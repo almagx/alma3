@@ -275,23 +275,29 @@ def load_release(
     explicit: str | Path | None = None,
     *,
     device: str = "cpu",
+    load_model: bool = True,
 ) -> dict[str, Any]:
+    def validate(path: Path) -> dict[str, Any]:
+        if load_model:
+            return validate_release(path, device=device)
+        return validate_release(path, device=device, load_model=False)
+
     if explicit is not None:
         path = Path(explicit).expanduser()
-        return validate_release(path, device=device)
+        return validate(path)
     configured = os.environ.get(RELEASE_ENV)
     if configured:
         path = Path(configured).expanduser()
-        return validate_release(path, device=device)
+        return validate(path)
     cached = cached_release_path()
     if cached.exists() or cached.is_symlink():
         try:
-            return validate_release(cached, device=device)
+            return validate(cached)
         except (DownloadError, OSError, ValueError):
             cached = download_release(repair_managed_cache=True)
-            return validate_release(cached, device=device)
+            return validate(cached)
     cached = download_release()
-    return validate_release(cached, device=device)
+    return validate(cached)
 
 
 def main(argv: list[str] | None = None) -> int:

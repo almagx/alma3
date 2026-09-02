@@ -98,6 +98,17 @@ class RuntimeContractTests(unittest.TestCase):
             (copied / "generated-output.txt").write_text("ignored\n", encoding="utf-8")
             self.assertEqual(runtime_contract_sha256(copied), expected)
 
+            target = copied / "assets" / "alma3-3.0.0-grch38-projectable-cpgs.bed.gz"
+            target_payload = target.read_bytes()
+            target.write_bytes(target_payload + b"changed")
+            self.assertNotEqual(runtime_contract_sha256(copied), expected)
+            target.write_bytes(target_payload)
+            self.assertEqual(runtime_contract_sha256(copied), expected)
+            target.unlink()
+            with self.assertRaisesRegex(FileNotFoundError, "missing contract file"):
+                runtime_contract_sha256(copied)
+            target.write_bytes(target_payload)
+
             source = copied / "clinical_result.py"
             source.write_text(source.read_text(encoding="utf-8") + "# fingerprint change\n", encoding="utf-8")
             self.assertNotEqual(runtime_contract_sha256(copied), expected)

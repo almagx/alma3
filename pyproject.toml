@@ -34,7 +34,7 @@ alma3 = "alma3.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-alma3 = ["examples/*.csv.gz", "schemas/*.json", "release_catalog.json", "py.typed"]
+alma3 = ["assets/*.bed.gz", "examples/*.csv.gz", "schemas/*.json", "release_catalog.json", "py.typed"]
 
 [tool.ruff]
 line-length = 120
