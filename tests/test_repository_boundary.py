@@ -107,12 +107,20 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
     def test_readme_collapses_optional_sections(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        for section in ("Key features", "Inputs", "Results", "Python", "Docker", "Performance"):
+        for section in (
+            "Key features",
+            "Inputs",
+            "Results",
+            "Python",
+            "Docker",
+            "Performance",
+            "Citation",
+            "Support",
+            "License",
+        ):
             with self.subTest(section=section):
                 self.assertIn(f"<summary><strong>{section}</strong></summary>", readme)
         self.assertLess(readme.index("<strong>Docker</strong>"), readme.index("<strong>Performance</strong>"))
-        self.assertIn("## Citation", readme)
-        self.assertNotIn("<summary><strong>Citation</strong></summary>", readme)
 
 
 if __name__ == "__main__":

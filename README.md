@@ -192,16 +192,22 @@ The first run downloads the 3.9 GB model. Multiple samples in one command or Pyt
 
 </details>
 
-## Citation
+<details><summary><strong>Citation</strong></summary>
 
 TBD
 
-## Support
+</details>
+
+<details><summary><strong>Support</strong></summary>
 
 Questions or feedback: [open an issue](https://github.com/almagx/alma3/issues) or email <a href="mailto:support@almagx.com">support@almagx.com</a>.
 
-## License
+</details>
+
+<details><summary><strong>License</strong></summary>
 
 ALMA3 source and released model weights use the ALMA3 License 1.0.
 
 ALMA3 models are free to explore and use for research, education, and other noncommercial or internal projects.
+
+</details>
