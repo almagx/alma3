@@ -44,7 +44,7 @@ alma3 infer -i sample.bed -o sample.alma3.csv
 ## Point-and-click automatic analysis
 
 > [!TIP]
-> <a href="https://app.almagx.com/">Open ALMAGX</a> for automated preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.
+> Use our platform, [app.almagx.com](https://app.almagx.com/), for automated preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.
 
 <details><summary><strong>Inputs</strong></summary>
 
@@ -59,7 +59,7 @@ alma3 infer -i sample.bed -o sample.alma3.csv
 
 </details>
 
-## Oxford Nanopore
+<details><summary><strong>Oxford Nanopore</strong></summary>
 
 Infinium arrays cannot distinguish 5mC from 5hmC. For ONT, combine both with pinned Modkit `v0.6.3`. The BAM must be coordinate-sorted and indexed against the same chr-prefixed GRCh38 FASTA, with an adjacent `.fai`.
 
@@ -88,7 +88,9 @@ alma3 infer \
 
 The exporter verifies GRCh38 and writes the 65,535 release CpGs plus a receipt. This Modkit command produces combined 5mC+5hmC input, which ALMA3 detects automatically. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
-## PacBio HiFi
+</details>
+
+<details><summary><strong>PacBio HiFi</strong></summary>
 
 PacBio 5mC is not equivalent to array 5mC+5hmC. Jasmine estimates 5mC and 5hmC independently, so never add or normalize their probabilities. Require standalone `C+m`; ignore separate `C+h`/`G-h`; reject compound `C+mh` and h-only input. See [Jasmine](https://github.com/PacificBiosciences/jasmine#overview) and [pb-CpG-tools](https://github.com/PacificBiosciences/pb-CpG-tools#input-alignment-file).
 
@@ -126,6 +128,8 @@ alma3 infer \
 ```
 
 For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not use count mode or `discretized_mod_score`. Filter after pileup because the model uses neighboring CpGs. The converted file uses `m`, so ALMA3 detects 5mC automatically. MethBat is not validated for ALMA3.
+
+</details>
 
 <details><summary><strong>Results</strong></summary>
 

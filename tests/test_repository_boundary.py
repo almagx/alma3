@@ -70,7 +70,9 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
     def test_readme_pins_the_ont_combined_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        ont = readme.split("## Oxford Nanopore", 1)[1].split("## PacBio HiFi", 1)[0]
+        ont = readme.split("<summary><strong>Oxford Nanopore</strong></summary>", 1)[1].split(
+            "<summary><strong>PacBio HiFi</strong></summary>", 1
+        )[0]
         for required in (
             "--modified-bases 5mC 5hmC",
             "--combine-mods",
@@ -85,7 +87,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
     def test_readme_pins_the_pacbio_5mc_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        pacbio = readme.split("## PacBio HiFi", 1)[1].split(
+        pacbio = readme.split("<summary><strong>PacBio HiFi</strong></summary>", 1)[1].split(
             "<summary><strong>Results</strong></summary>", 1
         )[0]
         for required in (
@@ -107,6 +109,8 @@ class RepositoryBoundaryTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         for section in (
             "Inputs",
+            "Oxford Nanopore",
+            "PacBio HiFi",
             "Results",
             "Python",
             "Docker",
@@ -117,12 +121,19 @@ class RepositoryBoundaryTests(unittest.TestCase):
         ):
             with self.subTest(section=section):
                 self.assertIn(f"<summary><strong>{section}</strong></summary>", readme)
-        for section in ("Key features", "Oxford Nanopore", "PacBio HiFi"):
-            with self.subTest(expanded_section=section):
-                heading = "###" if section == "Key features" else "##"
-                self.assertIn(f"{heading} {section}", readme)
-                self.assertNotIn(f"<summary><strong>{section}</strong></summary>", readme)
+        self.assertIn("### Key features", readme)
+        self.assertNotIn("<summary><strong>Key features</strong></summary>", readme)
+        inputs = readme.index("<summary><strong>Inputs</strong></summary>")
+        ont = readme.index("<summary><strong>Oxford Nanopore</strong></summary>")
+        pacbio = readme.index("<summary><strong>PacBio HiFi</strong></summary>")
+        self.assertLess(readme.index("</details>", inputs), ont)
+        self.assertLess(readme.index("</details>", ont), pacbio)
         self.assertLess(readme.index("<strong>Docker</strong>"), readme.index("<strong>Performance</strong>"))
+        self.assertIn(
+            "Use our platform, [app.almagx.com](https://app.almagx.com/), for automated "
+            "preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.",
+            readme,
+        )
 
     def test_readme_uses_plain_linked_license_copy_without_a_badge(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
