@@ -126,22 +126,28 @@ For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not us
 
 ## Results
 
-JSONL schema v2 is the canonical result. CSV is its fixed clinician-readable projection and carries the same nonredundant diagnostic and troubleshooting facts: result status, release and runtime identity, resolved device, input interpretation and clipping, CpG support, the complete reached hierarchy with per-level scores and cutoffs, and any unresolved differential. JSONL additionally retains numeric taxonomy indices and component hashes that can be resolved from the release-manifest hash recorded in CSV.
+JSONL schema v2 is canonical. CSV is its fixed 45-column human-readable projection with the same nonredundant result, differential, input, coverage, hierarchy, and provenance data. JSONL adds taxonomy indices and component hashes derivable from the CSV's release-manifest hash.
+
+### Status
 
 | Result | Meaning |
 |---|---|
-| `fully_resolved` | The applicable hierarchy was fully resolved. |
-| `heme_tumor_not_detected` | No hematolymphoid tumor signal was detected. |
-| `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
-| `no_call` | Tumor presence did not reach its reporting cutoff. |
+| `fully_resolved` | All applicable hierarchy levels resolved. |
+| `heme_tumor_not_detected` | No hematolymphoid tumor signal detected. |
+| `partially_resolved` | A deeper level missed its threshold. |
+| `no_call` | Tumor presence missed its threshold. |
 
-Every result includes a concise `result_summary`. Calls display the deepest accepted class and `100 × model_score` from the deepest scored accepted path node to one decimal place as confidence. For a hierarchy-implied class, that confidence carries forward from its deepest scored ancestor; `resolved_basis` and the path status identify the implication, while the implied class's structured score remains null in JSONL and blank in CSV. A partially resolved or no-call result also displays the first-ranked unresolved candidate, its confidence, and the applicable threshold. Only that leading candidate appears in the summary; both ranked candidates remain available in the structured differential fields.
+### Summary
 
-Confidence is `100 ×` the parent-conditioned model score for either an accepted call or the displayed leading candidate. The leading candidate remains unresolved because its confidence is below the displayed threshold. Confidence is not an individual patient probability, positive predictive value, or standalone measure of diagnostic certainty. Raw scores and reporting cutoffs remain unrounded in JSONL and CSV; the summary alone uses the shorter word `threshold` and rounds displayed percentages to one decimal place.
+`result_summary` states the accepted call and confidence, when present. Unresolved results also state the leading candidate, its confidence, and threshold; both candidates remain in the differential fields.
 
-The fixed 45-column CSV is ordered for human review: primary result, unresolved differential, CpG/input context, hierarchy evidence, then contract and runtime provenance. BedMethyl rows record `input_modification_mode`; array rows leave it blank. Each hierarchy level contains classification, status, model score, and reporting cutoff. Scored levels populate all four fields; hierarchy-implied levels have blank score and cutoff fields; unreached levels are entirely blank. Unresolved decision fields are populated only for `partially_resolved` and `no_call` results.
+Confidence is `100 ×` the parent-conditioned model score, not patient probability, predictive value, or diagnostic certainty. Implied calls use their deepest scored ancestor's confidence; their score and cutoff stay blank. Summaries round to one decimal; structured values remain unrounded.
 
-For troubleshooting, send the original generated CSV without opening and resaving it in spreadsheet software, which can alter identifiers or numeric precision.
+### CSV
+
+Column order is result, differential, CpG/input, hierarchy, provenance. Scored levels fill classification, status, score, and cutoff; implied levels omit score and cutoff; unreached levels are blank. Decision fields are populated only when unresolved. `input_modification_mode` is set for BedMethyl and blank for arrays.
+
+For support, send the original CSV without opening or resaving it; spreadsheet software can alter IDs and precision.
 
 ## Python
 
