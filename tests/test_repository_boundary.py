@@ -70,8 +70,8 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
     def test_readme_pins_the_ont_combined_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        ont = readme.split("### Oxford Nanopore (ONT) 5mC+5hmC", 1)[1].split(
-            "### PacBio HiFi 5mC", 1
+        ont = readme.split("### Oxford Nanopore: combined 5mC+5hmC", 1)[1].split(
+            "### PacBio HiFi: 5mC only", 1
         )[0]
         for required in (
             "--modified-bases 5mC 5hmC",
@@ -81,14 +81,14 @@ class RepositoryBoundaryTests(unittest.TestCase):
             "--no-filtering",
             "--include-bed",
             "--bedmethyl-modification-mode 5mc_plus_5hmc",
-            "ONT input must use `5mc_plus_5hmc`",
+            "ONT requires `5mc_plus_5hmc`",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, ont)
 
     def test_readme_pins_the_pacbio_5mc_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        pacbio = readme.split("### PacBio HiFi 5mC", 1)[1].split("## Results", 1)[0]
+        pacbio = readme.split("### PacBio HiFi: 5mC only", 1)[1].split("## Results", 1)[0]
         for required in (
             "--pileup-mode model",
             "--modsites-mode denovo",
@@ -97,8 +97,8 @@ class RepositoryBoundaryTests(unittest.TestCase):
             '$5 == "Total"',
             '$6, $4',
             "--bedmethyl-modification-mode 5mc",
-            "Do not use count mode or the derived `discretized_mod_score`",
-            "must not be added or normalized",
+            "Do not use count mode or `discretized_mod_score`",
+            "never add or normalize their probabilities",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, pacbio)
