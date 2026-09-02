@@ -70,9 +70,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
     def test_readme_pins_the_ont_combined_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        ont = readme.split("<summary><strong>Oxford Nanopore</strong></summary>", 1)[1].split(
-            "<summary><strong>PacBio HiFi</strong></summary>", 1
-        )[0]
+        ont = readme.split("## Oxford Nanopore", 1)[1].split("## PacBio HiFi", 1)[0]
         for required in (
             "--modified-bases 5mC 5hmC",
             "--combine-mods",
@@ -87,7 +85,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
     def test_readme_pins_the_pacbio_5mc_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        pacbio = readme.split("<summary><strong>PacBio HiFi</strong></summary>", 1)[1].split(
+        pacbio = readme.split("## PacBio HiFi", 1)[1].split(
             "<summary><strong>Results</strong></summary>", 1
         )[0]
         for required in (
@@ -108,7 +106,6 @@ class RepositoryBoundaryTests(unittest.TestCase):
     def test_readme_collapses_optional_sections(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         for section in (
-            "Key features",
             "Inputs",
             "Results",
             "Python",
@@ -120,7 +117,22 @@ class RepositoryBoundaryTests(unittest.TestCase):
         ):
             with self.subTest(section=section):
                 self.assertIn(f"<summary><strong>{section}</strong></summary>", readme)
+        for section in ("Key features", "Oxford Nanopore", "PacBio HiFi"):
+            with self.subTest(expanded_section=section):
+                heading = "###" if section == "Key features" else "##"
+                self.assertIn(f"{heading} {section}", readme)
+                self.assertNotIn(f"<summary><strong>{section}</strong></summary>", readme)
         self.assertLess(readme.index("<strong>Docker</strong>"), readme.index("<strong>Performance</strong>"))
+
+    def test_readme_uses_plain_linked_license_copy_without_a_badge(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "ALMA3 models are free to explore and use for research, education, and other "
+            "noncommercial or internal projects. For commercial use, see "
+            "[ALMA3 License 1.0](LICENSE).",
+            readme,
+        )
+        self.assertNotIn('alt="ALMA3 License 1.0"', readme)
 
 
 if __name__ == "__main__":
