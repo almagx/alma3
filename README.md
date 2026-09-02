@@ -19,11 +19,13 @@
 
 ALMA3 is an epigenomic foundation model. ALMA3-Dx uses its learned representation to classify hematolymphoid tumors, reporting the deepest supported conclusion from tumor presence through subtype.
 
-### Key features
+<details><summary><strong>Key features</strong></summary>
 
 - **Billion-parameter methylation transformer:** 1,044,514,206 parameters, 36 transformer layers, 24 attention heads, and a 1,536-dimensional representation across 65,536 curated CpGs.
 - **Large-scale diagnostic training:** fine-tuned with 97,374 supervised training samples.
 - **Deep diagnostic hierarchy:** 2 tumor-presence classifications, 5 lineages, 14 families, 34 types, and 102 subtypes.
+
+</details>
 
 ## Quick start
 
@@ -42,7 +44,12 @@ alma3 infer -i sample.bed -o sample.alma3.jsonl
 alma3 infer -i sample.bed -o sample.alma3.csv
 ```
 
-## Inputs
+## Point-and-click automatic analysis
+
+> [!TIP]
+> <a href="https://app.almagx.com/">Open ALMAGX</a> for automated preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.
+
+<details><summary><strong>Inputs</strong></summary>
 
 | Input | Filename | Required preparation |
 |---|---|---|
@@ -53,8 +60,7 @@ alma3 infer -i sample.bed -o sample.alma3.csv
 - Raw IDAT files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
 - Each sample must contain at least 1,500 recognized ALMA3 CpGs. Sample IDs must be nonempty and unique, with no surrounding whitespace or leading `=`, `+`, `-`, or `@`.
 
-<details>
-<summary><strong>Oxford Nanopore</strong></summary>
+<details><summary><strong>Oxford Nanopore</strong></summary>
 
 Infinium arrays cannot distinguish 5mC from 5hmC. For ONT, combine both with pinned Modkit `v0.6.3`. The BAM must be coordinate-sorted and indexed against the same chr-prefixed GRCh38 FASTA, with an adjacent `.fai`.
 
@@ -85,8 +91,7 @@ The exporter verifies GRCh38 and writes the 65,535 release CpGs plus a receipt. 
 
 </details>
 
-<details>
-<summary><strong>PacBio HiFi</strong></summary>
+<details><summary><strong>PacBio HiFi</strong></summary>
 
 PacBio 5mC is not equivalent to array 5mC+5hmC. Jasmine estimates 5mC and 5hmC independently, so never add or normalize their probabilities. Require standalone `C+m`; ignore separate `C+h`/`G-h`; reject compound `C+mh` and h-only input. See [Jasmine](https://github.com/PacificBiosciences/jasmine#overview) and [pb-CpG-tools](https://github.com/PacificBiosciences/pb-CpG-tools#input-alignment-file).
 
@@ -127,7 +132,9 @@ For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not us
 
 </details>
 
-## Results
+</details>
+
+<details><summary><strong>Results</strong></summary>
 
 CSV is easiest to read and share; JSONL provides the same result in a structured format for software integrations.
 
@@ -138,7 +145,9 @@ CSV is easiest to read and share; JSONL provides the same result in a structured
 | `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
 | `no_call` | Tumor presence did not reach its reporting cutoff. |
 
-## Python
+</details>
+
+<details><summary><strong>Python</strong></summary>
 
 ```python
 from alma3 import ALMA3
@@ -150,7 +159,9 @@ array_results = model.predict_array(beta, cpg_ids, sample_ids, input_values="bet
 
 The model loads once and preserves sample order. `device="auto"` uses CUDA when available and otherwise uses the CPU.
 
-## Performance
+</details>
+
+<details><summary><strong>Performance</strong></summary>
 
 Use CPU with at least 16 GB RAM for occasional samples:
 
@@ -168,7 +179,9 @@ pip install alma3
 
 The first run downloads the 3.9 GB model. Multiple samples in one command or Python object reuse the loaded model. The standalone Docker image is CPU-only.
 
-## Docker
+</details>
+
+<details><summary><strong>Docker</strong></summary>
 
 The standalone image includes the model and runs on CPU:
 
@@ -177,14 +190,13 @@ docker run --rm -v "$PWD:/work" alma3:3.0.0 \
   infer -i /work/sample.bed -o /work/sample.alma3.jsonl
 ```
 
-## Point-and-click automatic analysis
+</details>
 
-> [!TIP]
-> <a href="https://app.almagx.com/">Open ALMAGX</a> for automated preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.
-
-## Citation
+<details><summary><strong>Citation</strong></summary>
 
 TBD
+
+</details>
 
 ## Support
 

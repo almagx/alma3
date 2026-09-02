@@ -88,7 +88,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
     def test_readme_pins_the_pacbio_5mc_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         pacbio = readme.split("<summary><strong>PacBio HiFi</strong></summary>", 1)[1].split(
-            "## Results", 1
+            "<summary><strong>Results</strong></summary>", 1
         )[0]
         for required in (
             "--pileup-mode model",
@@ -104,6 +104,12 @@ class RepositoryBoundaryTests(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, pacbio)
         self.assertNotIn("--bedmethyl-modification-mode", readme)
+
+    def test_readme_collapses_optional_sections(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for section in ("Key features", "Inputs", "Results", "Python", "Performance", "Docker", "Citation"):
+            with self.subTest(section=section):
+                self.assertIn(f"<summary><strong>{section}</strong></summary>", readme)
 
 
 if __name__ == "__main__":
