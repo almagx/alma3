@@ -161,6 +161,17 @@ The model loads once and preserves sample order. `device="auto"` uses CUDA when 
 
 </details>
 
+<details><summary><strong>Docker</strong></summary>
+
+The standalone image includes the model and runs on CPU:
+
+```bash
+docker run --rm -v "$PWD:/work" alma3:3.0.0 \
+  infer -i /work/sample.bed -o /work/sample.alma3.jsonl
+```
+
+</details>
+
 <details><summary><strong>Performance</strong></summary>
 
 Use CPU with at least 16 GB RAM for occasional samples:
@@ -181,26 +192,13 @@ The first run downloads the 3.9 GB model. Multiple samples in one command or Pyt
 
 </details>
 
-<details><summary><strong>Docker</strong></summary>
-
-The standalone image includes the model and runs on CPU:
-
-```bash
-docker run --rm -v "$PWD:/work" alma3:3.0.0 \
-  infer -i /work/sample.bed -o /work/sample.alma3.jsonl
-```
-
-</details>
-
-<details><summary><strong>Citation</strong></summary>
+## Citation
 
 TBD
 
-</details>
-
 ## Support
 
-Questions or feedback: email <a href="mailto:support@almagx.com">support@almagx.com</a> or [open an issue](https://github.com/almagx/alma3/issues).
+Questions or feedback: [open an issue](https://github.com/almagx/alma3/issues) or email <a href="mailto:support@almagx.com">support@almagx.com</a>.
 
 ## License
 
