@@ -36,10 +36,10 @@ Run your own sample:
 
 ```bash
 # Complete JSONL
-alma3 infer -i sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc -o sample.alma3.jsonl
+alma3 infer -i sample.bed -o sample.alma3.jsonl
 
 # Clinician-readable CSV
-alma3 infer -i sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc -o sample.alma3.csv
+alma3 infer -i sample.bed -o sample.alma3.csv
 ```
 
 ## Inputs
@@ -50,7 +50,7 @@ alma3 infer -i sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc -o sample.
 | BedMethyl | `.bed` or `.bed.gz` | One GRCh38 sample per file, tab-delimited with at least 11 columns |
 
 - In array CSVs, CpG headers should look like `cg00000029`, not gene names. Supply beta values as decimals near `0` to `1`. Mild corrected excursions are accepted. Use `--input-values mvalue` for M-values. Leave missing measurements blank or `NaN`; do not replace them with zero or transpose the matrix.
-- For BedMethyl, column 1 is the chromosome, column 2 is the 0-based start, column 10 is coverage, and column 11 is the modified fraction from `0` to `100`. Every BedMethyl inference must declare `--bedmethyl-modification-mode 5mc_plus_5hmc` or `5mc`; ALMA3 records the declaration because BedMethyl itself cannot prove which upstream modifications were aggregated.
+- For BedMethyl, column 4 must be `C` for combined 5mC+5hmC or `m` for 5mC. ALMA3 detects and records it automatically. Column 10 is coverage and column 11 is the modified fraction from `0` to `100`.
 - Each sample must contain at least 1,500 recognized ALMA3 CpGs. Raw IDAT and BAM files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or <a href="https://nanoporetech.github.io/modkit/intro_pileup.html">modkit</a>, or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
 - Sample IDs must be nonempty and unique, with no surrounding whitespace, ASCII control characters, or leading `=`, `+`, `-`, or `@`.
 
@@ -78,11 +78,10 @@ docker run --rm \
 
 alma3 infer \
   -i sample.bed \
-  --bedmethyl-modification-mode 5mc_plus_5hmc \
   -o sample.alma3.csv
 ```
 
-The exporter verifies GRCh38 and writes the 65,535 release CpGs plus a receipt. ONT requires `5mc_plus_5hmc`; use `5mc` only for supported 5mC-only inputs such as PacBio. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
+The exporter verifies GRCh38 and writes the 65,535 release CpGs plus a receipt. This Modkit command produces combined 5mC+5hmC input, which ALMA3 detects automatically. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
 ### PacBio HiFi: 5mC only
 
@@ -118,11 +117,10 @@ awk -v target_file="alma3-3.0.0-grch38-cpgs.bed" '
 
 alma3 infer \
   -i sample.5mc.bed \
-  --bedmethyl-modification-mode 5mc \
   -o sample.alma3.csv
 ```
 
-For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not use count mode or `discretized_mod_score`. Filter after pileup because the model uses neighboring CpGs. MethBat is not validated for ALMA3. Declare `5mc`.
+For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not use count mode or `discretized_mod_score`. Filter after pileup because the model uses neighboring CpGs. The converted file uses `m`, so ALMA3 detects 5mC automatically. MethBat is not validated for ALMA3.
 
 ## Results
 
@@ -147,14 +145,7 @@ Use CSV to review, share, or troubleshoot results; use JSONL for software integr
 from alma3 import ALMA3
 
 model = ALMA3()
-bed_results = model.predict_bedmethyl(
-    ["sample-1.bed", "sample-2.bed"],
-    modification_mode="5mc_plus_5hmc",
-)
-pacbio_results = model.predict_bedmethyl(
-    ["sample.5mc.bed"],
-    modification_mode="5mc",
-)
+bed_results = model.predict_bedmethyl(["sample-1.bed", "sample-2.bed"])
 array_results = model.predict_array(beta, cpg_ids, sample_ids, input_values="beta")
 ```
 
@@ -184,8 +175,7 @@ The standalone image includes the model and runs on CPU:
 
 ```bash
 docker run --rm -v "$PWD:/work" alma3:3.0.0 \
-  infer -i /work/sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc \
-  -o /work/sample.alma3.jsonl
+  infer -i /work/sample.bed -o /work/sample.alma3.jsonl
 ```
 
 ## Point-and-click automatic analysis

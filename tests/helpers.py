@@ -298,9 +298,14 @@ def write_array_csv(
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
-def write_bedmethyl(path: Path, *, fraction_modified: float = 50.0) -> None:
+def write_bedmethyl(
+    path: Path,
+    *,
+    fraction_modified: float = 50.0,
+    modification_code: str = "C",
+) -> None:
     rows = [
-        f"chr1\t{start}\t{start + 1}\t.\t0\t.\t{start}\t{start + 1}\t0\t10\t{fraction_modified}"
+        f"chr1\t{start}\t{start + 1}\t{modification_code}\t0\t.\t{start}\t{start + 1}\t0\t10\t{fraction_modified}"
         for start in range(100, 100 + MINIMUM_RUNTIME_INPUT_CPGS)
     ]
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")

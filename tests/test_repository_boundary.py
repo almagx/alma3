@@ -80,8 +80,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
             "--combine-strands",
             "--no-filtering",
             "--include-bed",
-            "--bedmethyl-modification-mode 5mc_plus_5hmc",
-            "ONT requires `5mc_plus_5hmc`",
+            "ALMA3 detects automatically",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, ont)
@@ -96,12 +95,13 @@ class RepositoryBoundaryTests(unittest.TestCase):
             "--min-mapq 1",
             '$5 == "Total"',
             '$6, $4',
-            "--bedmethyl-modification-mode 5mc",
             "Do not use count mode or `discretized_mod_score`",
             "never add or normalize their probabilities",
+            "ALMA3 detects 5mC automatically",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, pacbio)
+        self.assertNotIn("--bedmethyl-modification-mode", readme)
 
 
 if __name__ == "__main__":

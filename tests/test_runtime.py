@@ -174,16 +174,15 @@ class RuntimeContractTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as raw:
             bed = Path(raw) / "sample.bed"
-            bed.write_text("chr1\t100\t101\t.\t0\t.\t100\t101\t0\t10\t50\n", encoding="utf-8")
-            _, beta, observed, coverage = load_bed_methyl_with_manifest(
-                bed,
-                manifest,
-                modification_mode="5mc_plus_5hmc",
+            bed.write_text("chr1\t100\t101\tC\t0\t.\t100\t101\t0\t10\t50\n", encoding="utf-8")
+            _, beta, observed, coverage, modification_mode = load_bed_methyl_with_manifest(
+                bed, manifest
             )
         self.assertIs(manifest.coordinate_index, manifest.coordinate_index)
         self.assertEqual(beta.tolist(), [[0.5, 0.5]])
         self.assertEqual(observed.tolist(), [[True, True]])
         self.assertEqual(coverage.tolist(), [[10, 10]])
+        self.assertEqual(modification_mode, "5mc_plus_5hmc")
 
     def test_package_module_entrypoint_and_concise_cli_errors(self) -> None:
         completed = subprocess.run(
@@ -210,7 +209,7 @@ class RuntimeContractTests(unittest.TestCase):
             first = root / "first.bed"
             second = root / "second.bed"
             write_bedmethyl(first)
-            write_bedmethyl(second, fraction_modified=25.0)
+            write_bedmethyl(second, fraction_modified=25.0, modification_code="m")
             output = root / "result.jsonl"
             embedded_batch_sizes: list[int] = []
             original_embed = DiagnosticModel.embed
@@ -230,56 +229,75 @@ class RuntimeContractTests(unittest.TestCase):
                     output,
                     device="cpu",
                     batch_size=2,
-                    bedmethyl_modification_mode="5mc_plus_5hmc",
                 )
             results = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(embedded_batch_sizes, [2])
             self.assertEqual([result["sample_id"] for result in results], ["first", "second"])
-            self.assertTrue(
-                all(
-                    result["input"]
-                    == {
-                        "format": "bedmethyl",
-                        "value_mode": "fraction_modified",
-                        "modification_mode": "5mc_plus_5hmc",
-                        "clipped_value_count": 0,
-                    }
-                    for result in results
-                )
+            self.assertEqual(
+                [result["input"]["modification_mode"] for result in results],
+                ["5mc_plus_5hmc", "5mc"],
             )
+            self.assertTrue(all(result["input"]["format"] == "bedmethyl" for result in results))
+            self.assertTrue(
+                all(result["input"]["value_mode"] == "fraction_modified" for result in results)
+            )
+            self.assertTrue(all(result["input"]["clipped_value_count"] == 0 for result in results))
 
-    def test_bedmethyl_modification_mode_is_explicit_and_format_bound(self) -> None:
+    def test_bedmethyl_modification_mode_is_detected_and_strict(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            bed = root / "sample.bed"
-            array = root / "samples.csv"
-            bed.write_text("chr1\t100\t101\t.\t0\t.\t100\t101\t0\t10\t50\n", encoding="utf-8")
-            array.write_text("sample_id,cg0000000\nsample,0.5\n", encoding="utf-8")
-            with patch("alma3.infer.ALMA3") as runtime:
-                for mode in (None, "unknown"):
-                    with self.subTest(mode=mode), self.assertRaisesRegex(
-                        InputContractError,
-                        "bedmethyl-modification-mode is required",
-                    ):
-                        run_inference(
-                            None,
-                            bed,
-                            "bedmethyl",
-                            root / f"{mode}.jsonl",
-                            bedmethyl_modification_mode=mode,
-                        )
-                with self.assertRaisesRegex(
-                    InputContractError,
-                    "applies only to bedmethyl",
-                ):
-                    run_inference(
-                        None,
-                        array,
-                        "array-csv",
-                        root / "array.jsonl",
-                        bedmethyl_modification_mode="5mc_plus_5hmc",
-                    )
-            runtime.assert_not_called()
+            manifest = CpGManifest(
+                cpg_ids=("target",),
+                chr_id=torch.tensor([0]),
+                pos=torch.tensor([0.1]),
+                chrom=("chr1",),
+                start=(100,),
+            )
+            for code, expected in (("m", "5mc"), ("C", "5mc_plus_5hmc")):
+                bed = root / f"{expected}.bed"
+                bed.write_text(
+                    f"chr1\t100\t101\t{code}\t0\t.\t100\t101\t0\t10\t50\n",
+                    encoding="utf-8",
+                )
+                *_, observed_mode = load_bed_methyl_with_manifest(bed, manifest)
+                self.assertEqual(observed_mode, expected)
+
+            unknown = root / "unknown.bed"
+            unknown.write_text(
+                "chr1\t100\t101\th\t0\t.\t100\t101\t0\t10\t50\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(InputContractError, "column 4 must be"):
+                load_bed_methyl_with_manifest(unknown, manifest)
+
+            mixed = root / "mixed.bed"
+            mixed.write_text(
+                "chr1\t100\t101\tC\t0\t.\t100\t101\t0\t10\t50\n"
+                "chr1\t101\t102\tm\t0\t.\t101\t102\t0\t10\t50\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(InputContractError, "mixed modification modes"):
+                load_bed_methyl_with_manifest(mixed, manifest)
+
+    def test_python_bedmethyl_api_detects_each_input_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            release, model = create_release(root / "release")
+            validated = validated_release_fixture(release, model)
+            combined = root / "combined.bed"
+            pacbio = root / "pacbio.bed"
+            write_bedmethyl(combined, modification_code="C")
+            write_bedmethyl(pacbio, modification_code="m")
+
+            with patch("alma3.runtime.load_release", return_value=validated):
+                results = ALMA3(release, device="cpu").predict_bedmethyl(
+                    [combined, pacbio], batch_size=2
+                )
+
+            self.assertEqual(
+                [result["input"]["modification_mode"] for result in results],
+                ["5mc_plus_5hmc", "5mc"],
+            )
 
     def test_invalid_outputs_fail_before_model_loading(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -541,14 +559,12 @@ class RuntimeContractTests(unittest.TestCase):
                 load_bed_methyl_with_manifest(
                     bed_path,
                     validated["cpg"],
-                    modification_mode="5mc_plus_5hmc",
                 )
             with self.assertRaisesRegex(InputContractError, "sample ID"):
                 load_bed_methyl_with_manifest(
                     bed_path,
                     validated["cpg"],
                     sample_id="",
-                    modification_mode="5mc_plus_5hmc",
                 )
 
             beta = torch.full((1, len(validated["cpg"].cpg_ids)), 0.5)
@@ -1042,7 +1058,7 @@ class RuntimeContractTests(unittest.TestCase):
             release, model = create_release(root / "release")
             validated = validated_release_fixture(release, model)
             bed = root / "sample.bed"
-            bed.write_text("chr1\t100\t101\t.\t0\t.\t100\t101\t0\t10\t50\n", encoding="utf-8")
+            bed.write_text("chr1\t100\t101\tC\t0\t.\t100\t101\t0\t10\t50\n", encoding="utf-8")
             original_reader = __import__("csv").reader
 
             def mutating_reader(handle, *args, **kwargs):
@@ -1056,7 +1072,6 @@ class RuntimeContractTests(unittest.TestCase):
                 load_bed_methyl_with_manifest(
                     bed,
                     validated["cpg"],
-                    modification_mode="5mc_plus_5hmc",
                 )
 
             input_path = root / "input.csv"
@@ -1108,7 +1123,6 @@ class RuntimeContractTests(unittest.TestCase):
                 embedding_sidecar=None,
                 batch_size=2,
                 input_values="beta",
-                bedmethyl_modification_mode=None,
                 progress=False,
             )
         automatic = [item for item in arguments if item not in {"--artifact", "release"}]
@@ -1123,7 +1137,6 @@ class RuntimeContractTests(unittest.TestCase):
                 embedding_sidecar=None,
                 batch_size=8,
                 input_values="beta",
-                bedmethyl_modification_mode=None,
                 progress=False,
             )
         inferred = ["-i", "input.csv.gz", "-o", "result.jsonl", "--input-values", "mvalue"]
@@ -1138,17 +1151,9 @@ class RuntimeContractTests(unittest.TestCase):
                 embedding_sidecar=None,
                 batch_size=2,
                 input_values="mvalue",
-                bedmethyl_modification_mode=None,
                 progress=False,
             )
-        bedmethyl = [
-            "-i",
-            "sample.bed",
-            "-o",
-            "result.jsonl",
-            "--bedmethyl-modification-mode",
-            "5mc_plus_5hmc",
-        ]
+        bedmethyl = ["-i", "sample.bed", "-o", "result.jsonl"]
         with patch("alma3.infer.run_inference") as run:
             self.assertEqual(infer_main(bedmethyl), 0)
             run.assert_called_once_with(
@@ -1160,9 +1165,10 @@ class RuntimeContractTests(unittest.TestCase):
                 embedding_sidecar=None,
                 batch_size=2,
                 input_values="beta",
-                bedmethyl_modification_mode="5mc_plus_5hmc",
                 progress=False,
             )
+        with self.assertRaises(SystemExit):
+            infer_main([*bedmethyl, "--bedmethyl-modification-mode", "5mc"])
         self.assertEqual(infer_input_format(["first.bed", "second.bed.gz"]), "bedmethyl")
         self.assertEqual(infer_input_format("cohort.csv.gz"), "array-csv")
         with self.assertRaisesRegex(InputContractError, "mixed formats"):

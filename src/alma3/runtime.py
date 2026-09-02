@@ -276,7 +276,6 @@ class ALMA3:
         self,
         inputs: str | Path | Sequence[str | Path],
         *,
-        modification_mode: str,
         batch_size: int = DEFAULT_BATCH_SIZE,
     ) -> list[dict[str, Any]]:
         """Predict one sample per BedMethyl file while preserving the supplied file order."""
@@ -313,10 +312,8 @@ class ALMA3:
             batch_input_metadata.clear()
 
         for path in paths:
-            sample_ids, beta, observed, coverage = load_bed_methyl_with_manifest(
-                path,
-                self.cpg,
-                modification_mode=modification_mode,
+            sample_ids, beta, observed, coverage, modification_mode = (
+                load_bed_methyl_with_manifest(path, self.cpg)
             )
             sample_id = sample_ids[0]
             if sample_id in seen:
