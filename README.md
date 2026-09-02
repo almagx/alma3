@@ -54,7 +54,9 @@ alma3 infer -i sample.bed --bedmethyl-modification-mode 5mc_plus_5hmc -o sample.
 - Each sample must contain at least 1,500 recognized ALMA3 CpGs. Raw IDAT and BAM files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or <a href="https://nanoporetech.github.io/modkit/intro_pileup.html">modkit</a>, or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
 - Sample IDs must be nonempty and unique, with no surrounding whitespace, ASCII control characters, or leading `=`, `+`, `-`, or `@`.
 
-Standard Infinium bisulfite chemistry does not distinguish 5mC from 5hmC. Prepare array-comparable ONT input with pinned Modkit `v0.6.3`, its [targeting behavior](https://nanoporetech.github.io/modkit/intro_include_bed.html), and one combined row per CpG. The BAM must be coordinate-sorted and indexed against the same chr-prefixed GRCh38 FASTA supplied to Modkit; the FASTA must have an adjacent `.fai`.
+### Oxford Nanopore (ONT) 5mC+5hmC
+
+Standard Infinium bisulfite arrays do not distinguish 5mC from 5hmC. For array-comparable ONT input, combine Modkit's 5mC and 5hmC calls into one fraction per CpG using the pinned Modkit `v0.6.3` command below. The BAM must be coordinate-sorted and indexed against the same chr-prefixed GRCh38 FASTA supplied to Modkit; the FASTA must have an adjacent `.fai`.
 
 ```bash
 alma3 export-bedmethyl-target \
@@ -80,11 +82,11 @@ alma3 infer \
   -o sample.alma3.csv
 ```
 
-The exporter validates chr1-chr22 and chrX GRCh38 lengths, confirms all 65,535 release-projectable intervals are CpGs, and writes a provenance receipt. The target is a deterministic export of the compressed target bundled with ALMA3. See the pinned [Modkit v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
+The exporter validates chr1-chr22 and chrX GRCh38 lengths, confirms all 65,535 release-projectable intervals are CpGs, and writes a provenance receipt. The target is a deterministic export of the compressed target bundled with ALMA3. ONT input must use `5mc_plus_5hmc`; `5mc` is reserved for supported 5mC-only inputs such as PacBio. See the [Modkit targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and pinned [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
 ### PacBio HiFi 5mC
 
-PacBio input is deliberately 5mC-only and is not chemically equivalent to the total 5mC+5hmC signal measured by a standard bisulfite array. Current Jasmine estimates 5mC and 5hmC with independent models whose probabilities must not be added or normalized. Require a standalone `C+m` track; separate `C+h`/`G-h` tracks may coexist but are not used by ALMA3, and compound `C+mh` calls are unsupported. See the [Jasmine modification semantics](https://github.com/PacificBiosciences/jasmine#overview) and [pb-CpG-tools input contract](https://github.com/PacificBiosciences/pb-CpG-tools#input-alignment-file).
+Use PacBio 5mC only; it is not chemically equivalent to the total 5mC+5hmC signal measured by a standard bisulfite array. Jasmine estimates 5mC and 5hmC with independent models whose probabilities must not be added or normalized. Require a standalone `C+m` track. Separate `C+h`/`G-h` tracks may coexist but are excluded from ALMA3 inference; compound `C+mh` and h-only inputs are unsupported. See the [Jasmine modification semantics](https://github.com/PacificBiosciences/jasmine#overview) and [pb-CpG-tools input contract](https://github.com/PacificBiosciences/pb-CpG-tools#input-alignment-file).
 
 Start with a coordinate-sorted, indexed BAM aligned by `pbmm2 --preset CCS` to chr-prefixed GRCh38. Preserve its `MM`/`ML` tags and do not use an aligner mode that hard-clips reads. Export the ALMA3 target as shown above, then run the pinned 5mC pileup:
 
@@ -120,7 +122,7 @@ alma3 infer \
   -o sample.alma3.csv
 ```
 
-The `model`/`denovo` projection above uses the primary continuous `mod_score` from column 4 and coverage from column 6 for `type=Total` rows. Do not use count mode or the derived `discretized_mod_score`. Run the complete pileup before filtering its output to the 65,535-coordinate ALMA3 target because the pileup model uses neighboring CpGs. Although PacBio now recommends MethBat for general new analyses, its aggregation has not been validated as an ALMA3 input, so this release retains the pinned pb-CpG-tools model projection. The required ALMA3 modification mode is `5mc`; there is no fallback.
+For `type=Total` rows, use the primary continuous `mod_score` from column 4 and coverage from column 6. Do not use count mode or the derived `discretized_mod_score`. Run the complete pileup before filtering it to the 65,535-coordinate ALMA3 target because the model uses neighboring CpGs. MethBat has not been validated as an ALMA3 input, so this release retains the pinned pb-CpG-tools projection. Declare `5mc`; there is no fallback.
 
 ## Results
 

@@ -68,6 +68,24 @@ class RepositoryBoundaryTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, joined)
 
+    def test_readme_pins_the_ont_combined_projection(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        ont = readme.split("### Oxford Nanopore (ONT) 5mC+5hmC", 1)[1].split(
+            "### PacBio HiFi 5mC", 1
+        )[0]
+        for required in (
+            "--modified-bases 5mC 5hmC",
+            "--combine-mods",
+            "--cpg",
+            "--combine-strands",
+            "--no-filtering",
+            "--include-bed",
+            "--bedmethyl-modification-mode 5mc_plus_5hmc",
+            "ONT input must use `5mc_plus_5hmc`",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, ont)
+
     def test_readme_pins_the_pacbio_5mc_projection(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         pacbio = readme.split("### PacBio HiFi 5mC", 1)[1].split("## Results", 1)[0]
