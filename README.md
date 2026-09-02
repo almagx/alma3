@@ -126,24 +126,18 @@ For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not us
 
 ## Results
 
-JSONL schema v2 is canonical. CSV is its fixed 45-column human-readable projection with the same nonredundant result, differential, input, coverage, hierarchy, and provenance data. JSONL adds taxonomy indices and component hashes derivable from the CSV's release-manifest hash.
-
-### Status
+JSONL schema v2 is the canonical result. CSV is its fixed clinician-readable projection and carries the same nonredundant diagnostic and troubleshooting facts: result status, release and runtime identity, resolved device, input interpretation and clipping, CpG support, the complete reached hierarchy with per-level scores and cutoffs, and any unresolved differential. JSONL additionally retains numeric taxonomy indices and component hashes that can be resolved from the release-manifest hash recorded in CSV.
 
 | Result | Meaning |
 |---|---|
-| `fully_resolved` | All applicable hierarchy levels resolved. |
-| `heme_tumor_not_detected` | No hematolymphoid tumor signal detected. |
-| `partially_resolved` | A deeper level missed its threshold. |
-| `no_call` | Tumor presence missed its threshold. |
-
-### Summary
+| `fully_resolved` | The applicable hierarchy was fully resolved. |
+| `heme_tumor_not_detected` | No hematolymphoid tumor signal was detected. |
+| `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
+| `no_call` | Tumor presence did not reach its reporting cutoff. |
 
 `result_summary` states the accepted call and confidence, when present. Unresolved results also state the leading candidate, its confidence, and threshold; both candidates remain in the differential fields.
 
-Confidence is `100 ×` the parent-conditioned model score, not patient probability, predictive value, or diagnostic certainty. Implied calls use their deepest scored ancestor's confidence; their score and cutoff stay blank. Summaries round to one decimal; structured values remain unrounded.
-
-### CSV
+Confidence is `100 ×` the parent-conditioned model score, not patient probability, predictive value, or diagnostic certainty. Implied calls use their deepest scored ancestor's confidence; their score and cutoff stay blank. A leading candidate remains unresolved because its confidence is below threshold. Summaries round to one decimal; structured values remain unrounded.
 
 Column order is result, differential, CpG/input, hierarchy, provenance. Scored levels fill classification, status, score, and cutoff; implied levels omit score and cutoff; unreached levels are blank. Decision fields are populated only when unresolved. `input_modification_mode` is set for BedMethyl and blank for arrays.
 
