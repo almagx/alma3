@@ -68,6 +68,23 @@ class RepositoryBoundaryTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, joined)
 
+    def test_readme_pins_the_pacbio_5mc_projection(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        pacbio = readme.split("### PacBio HiFi 5mC", 1)[1].split("## Results", 1)[0]
+        for required in (
+            "--pileup-mode model",
+            "--modsites-mode denovo",
+            "--min-coverage 4",
+            "--min-mapq 1",
+            '$5 == "Total"',
+            '$6, $4',
+            "--bedmethyl-modification-mode 5mc",
+            "Do not use count mode or the derived `discretized_mod_score`",
+            "must not be added or normalized",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, pacbio)
+
 
 if __name__ == "__main__":
     unittest.main()

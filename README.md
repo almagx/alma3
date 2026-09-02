@@ -82,7 +82,45 @@ alma3 infer \
 
 The exporter validates chr1-chr22 and chrX GRCh38 lengths, confirms all 65,535 release-projectable intervals are CpGs, and writes a provenance receipt. The target is a deterministic export of the compressed target bundled with ALMA3. See the pinned [Modkit v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
-Use `5mc` only for an explicitly 5mC-only BedMethyl projection, including the supported PacBio route. The mode is required and has no fallback.
+### PacBio HiFi 5mC
+
+PacBio input is deliberately 5mC-only and is not chemically equivalent to the total 5mC+5hmC signal measured by a standard bisulfite array. Current Jasmine estimates 5mC and 5hmC with independent models whose probabilities must not be added or normalized. Require a standalone `C+m` track; separate `C+h`/`G-h` tracks may coexist but are not used by ALMA3, and compound `C+mh` calls are unsupported. See the [Jasmine modification semantics](https://github.com/PacificBiosciences/jasmine#overview) and [pb-CpG-tools input contract](https://github.com/PacificBiosciences/pb-CpG-tools#input-alignment-file).
+
+Start with a coordinate-sorted, indexed BAM aligned by `pbmm2 --preset CCS` to chr-prefixed GRCh38. Preserve its `MM`/`ML` tags and do not use an aligner mode that hard-clips reads. Export the ALMA3 target as shown above, then run the pinned 5mC pileup:
+
+```bash
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" \
+  quay.io/pacbio/pb-cpg-tools@sha256:afd5468a423fe089f1437d525fdc19c704296f723958739a6fe226caa01fba1c \
+  /opt/pb-CpG-tools-v3.0.0-x86_64-unknown-linux-gnu/bin/aligned_bam_to_cpg_scores \
+    --bam /work/sample.pbmm2.sorted.bam \
+    --pileup-mode model \
+    --modsites-mode denovo \
+    --output-prefix /work/sample \
+    --threads 8 \
+    --min-coverage 4 \
+    --min-mapq 1
+
+gzip -cd sample.combined.bed.gz | \
+awk -v target_file="alma3-3.0.0-grch38-cpgs.bed" '
+  BEGIN {
+    FS = OFS = "\t"
+    while ((getline < target_file) > 0) keep[$1 SUBSEP $2] = 1
+    close(target_file)
+  }
+  $1 !~ /^#/ && $5 == "Total" && (($1 SUBSEP $2) in keep) {
+    print $1, $2, $3, "m", 0, ".", $2, $3, "255,0,0", $6, $4
+  }
+' > sample.5mc.bed
+
+alma3 infer \
+  -i sample.5mc.bed \
+  --bedmethyl-modification-mode 5mc \
+  -o sample.alma3.csv
+```
+
+The `model`/`denovo` projection above uses the primary continuous `mod_score` from column 4 and coverage from column 6 for `type=Total` rows. Do not use count mode or the derived `discretized_mod_score`. Run the complete pileup before filtering its output to the 65,535-coordinate ALMA3 target because the pileup model uses neighboring CpGs. Although PacBio now recommends MethBat for general new analyses, its aggregation has not been validated as an ALMA3 input, so this release retains the pinned pb-CpG-tools model projection. The required ALMA3 modification mode is `5mc`; there is no fallback.
 
 ## Results
 
@@ -112,6 +150,10 @@ model = ALMA3()
 bed_results = model.predict_bedmethyl(
     ["sample-1.bed", "sample-2.bed"],
     modification_mode="5mc_plus_5hmc",
+)
+pacbio_results = model.predict_bedmethyl(
+    ["sample.5mc.bed"],
+    modification_mode="5mc",
 )
 array_results = model.predict_array(beta, cpg_ids, sample_ids, input_values="beta")
 ```
