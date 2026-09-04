@@ -6,7 +6,6 @@ import hashlib
 import json
 import math
 import re
-import runpy
 import shutil
 import subprocess
 import sys
@@ -913,20 +912,6 @@ class RuntimeContractTests(unittest.TestCase):
                 for result in results
             ]
             self.assertEqual(rows, expected)
-            inspect_paired_results = runpy.run_path(
-                str(Path(__file__).resolve().parents[1] / "scripts" / "release-gate"),
-                run_name="alma3_release_gate_test",
-            )["inspect_paired_results"]
-            inspect_paired_results(json_output, csv_output)
-            tampered_csv = root / "tampered.csv"
-            tampered_rows = [dict(row) for row in rows]
-            tampered_rows[0]["observed_cpg_count"] = "999999"
-            with tampered_csv.open("w", encoding="utf-8", newline="") as handle:
-                writer = csv.DictWriter(handle, fieldnames=_RESULT_CSV_FIELDS, lineterminator="\n")
-                writer.writeheader()
-                writer.writerows(tampered_rows)
-            with self.assertRaisesRegex(RuntimeError, "inconsistent"):
-                inspect_paired_results(json_output, tampered_csv)
             self.assertEqual([row["sample_id"] for row in rows], ["sample-1", "sample-2", "sample-3"])
             self.assertTrue(all(row["result_summary"] == result["result_summary"] for row, result in zip(rows, results, strict=True)))
             self.assertTrue(all(row["input_format"] == "array-csv" for row in rows))
@@ -1140,7 +1125,7 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertFalse(sidecar.exists())
 
-    def test_infer_cli_supports_automatic_release_and_batching(self) -> None:
+    def test_infer_cli_supports_configured_release_and_batching(self) -> None:
         arguments = [
             "--artifact",
             "release",
@@ -1164,9 +1149,9 @@ class RuntimeContractTests(unittest.TestCase):
                 input_values="beta",
                 progress=False,
             )
-        automatic = [item for item in arguments if item not in {"--artifact", "release"}]
+        configured = [item for item in arguments if item not in {"--artifact", "release"}]
         with patch("alma3.infer.run_inference") as run, redirect_stderr(StringIO()):
-            self.assertEqual(infer_main([*automatic, "--batch-size", "8", "--device", "cuda:1"]), 0)
+            self.assertEqual(infer_main([*configured, "--batch-size", "8", "--device", "cuda:1"]), 0)
             run.assert_called_once_with(
                 None,
                 ["input.csv"],

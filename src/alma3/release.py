@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ RELEASE_FILES = RELEASE_PAYLOADS | {"SHA256SUMS.json", "RELEASE_COMPLETE"}
 RELEASE_KIND = "alma3_release"
 RELEASE_SCHEMA_VERSION = 1
 RELEASE_VERSION = "3.0.0"
+RELEASE_ENV = "ALMA3_RELEASE"
 RELEASE_LICENSE_HEADER = "ALMA3 LICENSE 1.0\n"
 RELEASE_METADATA_FIELDS = frozenset(
     {
@@ -269,6 +271,24 @@ def validate_release(
     return validated
 
 
+def load_release(
+    explicit: str | Path | None = None,
+    *,
+    device: torch.device | str = "cpu",
+    load_model: bool = True,
+) -> dict[str, Any]:
+    """Load an explicit release or the release configured by ALMA3_RELEASE."""
+
+    raw_path = explicit if explicit is not None else os.environ.get(RELEASE_ENV)
+    if not raw_path:
+        raise DxContractError("no ALMA3 release configured; use --artifact or set ALMA3_RELEASE")
+    return validate_release(
+        Path(raw_path).expanduser(),
+        device=device,
+        load_model=load_model,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="alma3 verify-release",
@@ -276,11 +296,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--artifact",
-        help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
+        help="release directory; otherwise use ALMA3_RELEASE",
     )
     args = parser.parse_args(argv)
-    from .download import load_release
-
     validated = load_release(args.artifact, device="cpu")
     summary = {
         "kind": "alma3_release_verification",

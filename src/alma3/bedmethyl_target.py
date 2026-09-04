@@ -10,9 +10,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from .download import load_release
 from .hashes import publish_new_file, sha256_file, validate_new_external_outputs
-from .release import revalidate_release_identity
+from .release import load_release, revalidate_release_identity
 
 TARGET_RESOURCE = "alma3-3.0.0-grch38-projectable-cpgs.bed.gz"
 TARGET_RELEASE_VERSION = "3.0.0"
@@ -319,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--artifact",
-        help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
+        help="release directory; otherwise use ALMA3_RELEASE",
     )
     parser.add_argument("--reference", required=True, help="chr-prefixed GRCh38 FASTA with adjacent .fai")
     parser.add_argument("--output", required=True, help="new uncompressed BED3 output ending in .bed")

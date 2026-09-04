@@ -69,54 +69,42 @@ class ReleaseGateCandidateTests(unittest.TestCase):
     def test_candidate_verifier_rejects_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             candidate = Path(raw)
-            wheel = candidate / "wheel" / "alma3-3.0.0-py3-none-any.whl"
             image = candidate / "image" / "alma3-3.0.0-cpu.tar"
-            wheel.parent.mkdir()
             image.parent.mkdir()
-            wheel.write_bytes(b"synthetic wheel")
             image_id = _write_docker_archive(image)
             acceptance = {
                 "image": {
-                    "archive_config_id": image_id,
                     "archive_sha256": GATE["_sha256"](image),
-                    "image_id": "sha256:" + "a" * 64,
+                    "image_id": image_id,
                 },
                 "kind": GATE["CANDIDATE_KIND"],
                 "schema_version": GATE["CANDIDATE_SCHEMA_VERSION"],
                 "status": "passed",
-                "wheel": {"sha256": GATE["_sha256"](wheel)},
             }
             (candidate / "acceptance.json").write_bytes(GATE["_canonical_json"](acceptance))
             checksums = {
                 "acceptance.json": GATE["_sha256"](candidate / "acceptance.json"),
                 "image/alma3-3.0.0-cpu.tar": GATE["_sha256"](image),
-                "wheel/alma3-3.0.0-py3-none-any.whl": GATE["_sha256"](wheel),
             }
             (candidate / "SHA256SUMS.json").write_bytes(GATE["_canonical_json"](checksums))
             (candidate / GATE["CANDIDATE_MARKER"]).write_bytes(b"complete\n")
 
-            verifier_globals = GATE["_verify_candidate"].__globals__
-            inspect_wheel = verifier_globals["inspect_wheel"]
-            verifier_globals["inspect_wheel"] = lambda _: None
-            try:
+            GATE["_verify_candidate"](candidate)
+            extra = candidate / "extra"
+            extra.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "directory layout"):
                 GATE["_verify_candidate"](candidate)
-                extra = candidate / "extra"
-                extra.mkdir()
-                with self.assertRaisesRegex(RuntimeError, "directory layout"):
-                    GATE["_verify_candidate"](candidate)
-                extra.rmdir()
-                wheel.write_bytes(b"tampered")
-                with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
-                    GATE["_verify_candidate"](candidate)
-            finally:
-                verifier_globals["inspect_wheel"] = inspect_wheel
+            extra.rmdir()
+            image.write_bytes(b"tampered")
+            with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                GATE["_verify_candidate"](candidate)
 
     def test_candidate_name_binds_source_and_release(self) -> None:
         source = {"commit": "a" * 40}
         release = {"manifest_sha256": "b" * 64}
         self.assertEqual(
             GATE["_expected_candidate_name"](source, release),
-            "alma3-3.0.0-rc-aaaaaaaa-bbbbbbbb",
+            "alma3-3.0.0-docker-aaaaaaaa-bbbbbbbb",
         )
 
     def test_current_citation_remains_tbd(self) -> None:

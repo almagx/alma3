@@ -12,7 +12,6 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("infer", help="run ALMA3-Dx inference", add_help=False)
     sub.add_parser("demo", help="run the packaged example", add_help=False)
-    sub.add_parser("download", help="download and verify the ALMA3 3.0.0 model", add_help=False)
     sub.add_parser("verify-release", help="verify an ALMA3 release artifact", add_help=False)
     sub.add_parser(
         "export-bedmethyl-target",
@@ -29,10 +28,6 @@ def main(argv: list[str] | None = None) -> int:
             from .infer import demo_main
 
             return demo_main(rest)
-        if args.command == "download":
-            from .download import main as download_main
-
-            return download_main(rest)
         if args.command == "verify-release":
             from .release import main as verify_release_main
 

@@ -29,7 +29,6 @@ class RepositoryBoundaryTests(unittest.TestCase):
                 "clinical_result.py",
                 "config.py",
                 "data.py",
-                "download.py",
                 "dx.py",
                 "hashes.py",
                 "infer.py",
@@ -60,7 +59,8 @@ class RepositoryBoundaryTests(unittest.TestCase):
         searchable = [
             path
             for path in files
-            if "tests" not in path.parts
+            if path.is_file()
+            and "tests" not in path.parts
             and (path.suffix in {".py", ".md", ".toml", ".sh"} or path.name == "Dockerfile")
         ]
         joined = "\n".join(path.read_text(encoding="utf-8") for path in searchable).lower()
@@ -112,9 +112,6 @@ class RepositoryBoundaryTests(unittest.TestCase):
             "Oxford Nanopore",
             "PacBio HiFi",
             "Results",
-            "Python",
-            "Docker",
-            "Performance",
             "Citation",
             "Support",
             "License",
@@ -128,7 +125,11 @@ class RepositoryBoundaryTests(unittest.TestCase):
         pacbio = readme.index("<summary><strong>PacBio HiFi</strong></summary>")
         self.assertLess(readme.index("</details>", inputs), ont)
         self.assertLess(readme.index("</details>", ont), pacbio)
-        self.assertLess(readme.index("<strong>Docker</strong>"), readme.index("<strong>Performance</strong>"))
+        self.assertNotIn("<summary><strong>Python</strong></summary>", readme)
+        self.assertNotIn("<summary><strong>Docker</strong></summary>", readme)
+        self.assertNotIn("<summary><strong>Performance</strong></summary>", readme)
+        self.assertIn("ghcr.io/almagx/alma3:3.0.0", readme)
+        self.assertNotIn("pip install alma3", readme)
         self.assertIn(
             "Use our platform, [app.almagx.com](https://app.almagx.com/), for automated "
             "preprocessing, ALMA3 classification, diagnostic maps, and integrated reports.",
@@ -144,6 +145,26 @@ class RepositoryBoundaryTests(unittest.TestCase):
             readme,
         )
         self.assertNotIn('alt="ALMA3 License 1.0"', readme)
+
+    def test_repository_has_no_public_model_downloader(self) -> None:
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        ).stdout.split(b"\0")
+        text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for raw_path in tracked
+            if raw_path
+            for path in (ROOT / raw_path.decode(),)
+            if path.is_file()
+            and path.suffix in {".py", ".md", ".toml", ".json", ".sh"}
+            and "tests" not in path.parts
+        ).lower()
+        for removed in ("models.almagx.com", "release_catalog.json", "alma3 download"):
+            with self.subTest(removed=removed):
+                self.assertNotIn(removed, text)
 
 
 if __name__ == "__main__":

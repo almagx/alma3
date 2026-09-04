@@ -7,14 +7,13 @@ name = "alma3"
 version = "3.0.0"
 description = "ALMA3 foundation and diagnostic inference"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.12,<3.13"
 authors = [{ name = "ALMA Genomics" }]
 license = { file = "LICENSE" }
 dependencies = [
   "torch==2.7.0",
   "safetensors==0.8.0",
   "numpy==1.26.4",
-  "filelock==3.29.0"
 ]
 
 [project.urls]
@@ -34,8 +33,8 @@ alma3 = "alma3.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-alma3 = ["assets/*.bed.gz", "examples/*.csv.gz", "examples/*.json", "schemas/*.json", "release_catalog.json", "py.typed"]
+alma3 = ["assets/*.bed.gz", "examples/*.csv.gz", "examples/*.json", "schemas/*.json", "py.typed"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"

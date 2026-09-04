@@ -17,29 +17,17 @@ import sys
 import tarfile
 import tempfile
 import uuid
-import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN_NAMES = {".safetensors", ".pt", ".pth", ".h5", ".hdf5"}
-FORBIDDEN_TEXT = (b"/home/", b"/data/", b"pac" + b"map", b"fai" + b"ss")
-PYTHON_IMAGES = {
-    "3.10": "python:3.10-slim-bookworm",
-    "3.11": "python:3.11-slim-bookworm",
-    "3.12": None,
-}
 DEMO_GZIP_SHA256 = "c7fd2afcba9b4830b9774cc646ccd060c7d48de9b0002fb9bebf77e551e45a37"
 DEMO_MANIFEST_SHA256 = "1ee42be811e5373d28ed6a2cd8bea895ea1df574fdb1de520e2f77d13354bcee"
-DEMO_MANIFEST = "alma3/examples/example_dataset.manifest.json"
-BEDMETHYL_TARGET = "alma3/assets/alma3-3.0.0-grch38-projectable-cpgs.bed.gz"
-BEDMETHYL_TARGET_GZIP_SHA256 = "c79f88affdb2848a85741d416b7b723b5c08077ee8948962114a666cfd23b7ac"
-BEDMETHYL_TARGET_SHA256 = "3e6feef17fc4813caf4186c63d63165e7ddb77a0c3b31c93a2a33ddf6eec916a"
-BEDMETHYL_TARGET_CPG_COUNT = 65_535
-CANDIDATE_KIND = "alma3_release_candidate_acceptance"
+CANDIDATE_KIND = "alma3_docker_release_candidate_acceptance"
 CANDIDATE_SCHEMA_VERSION = 1
 CANDIDATE_MARKER = "ACCEPTANCE_COMPLETE"
+PUBLIC_IMAGE = "ghcr.io/almagx/alma3"
 
 
 def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
@@ -65,22 +53,6 @@ def _write_new(path: Path, payload: bytes) -> None:
         handle.write(payload)
         handle.flush()
         os.fsync(handle.fileno())
-
-
-def _copy_new(source: Path, destination: Path) -> str:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256()
-    try:
-        with source.open("rb") as source_handle, destination.open("xb") as destination_handle:
-            for block in iter(lambda: source_handle.read(16 * 1024 * 1024), b""):
-                digest.update(block)
-                destination_handle.write(block)
-            destination_handle.flush()
-            os.fsync(destination_handle.fileno())
-    except BaseException:
-        destination.unlink(missing_ok=True)
-        raise
-    return digest.hexdigest()
 
 
 def _fsync_directory(path: Path) -> None:
@@ -171,7 +143,7 @@ def _citation_value() -> str:
     return value
 
 
-def _image_identity(tag: str) -> dict[str, Any]:
+def _image_identity(tag: str, source_commit: str) -> dict[str, Any]:
     completed = subprocess.run(
         ["docker", "image", "inspect", "--platform", "linux/amd64", tag],
         cwd=ROOT,
@@ -183,12 +155,15 @@ def _image_identity(tag: str) -> dict[str, Any]:
     if not isinstance(images, list) or len(images) != 1:
         raise RuntimeError(f"Docker returned an invalid image identity for {tag}")
     image = images[0]
+    labels = image.get("Config", {}).get("Labels") or {}
     identity = {
         "architecture": image.get("Architecture"),
         "image_id": image.get("Id"),
         "operating_system": image.get("Os"),
+        "revision": labels.get("org.opencontainers.image.revision"),
         "size_bytes": image.get("Size"),
         "tag": tag,
+        "version": labels.get("org.opencontainers.image.version"),
     }
     if (
         identity["architecture"] != "amd64"
@@ -197,6 +172,8 @@ def _image_identity(tag: str) -> dict[str, Any]:
         or not identity["image_id"].startswith("sha256:")
         or type(identity["size_bytes"]) is not int
         or identity["size_bytes"] <= 0
+        or identity["revision"] != source_commit
+        or identity["version"] != "3.0.0"
     ):
         raise RuntimeError(f"Docker image has an invalid release identity: {identity}")
     return identity
@@ -225,46 +202,6 @@ def _archive_config_id(path: Path) -> str:
         return f"sha256:{hashlib.sha256(config_file.read()).hexdigest()}"
 
 
-def inspect_wheel(wheel: Path) -> None:
-    with zipfile.ZipFile(wheel) as archive:
-        names = {info.filename for info in archive.infolist()}
-        if "alma3/py.typed" not in names:
-            raise RuntimeError("wheel is missing the PEP 561 marker")
-        if "alma3/examples/example_dataset.csv.gz" not in names:
-            raise RuntimeError("wheel is missing the packaged demo")
-        if DEMO_MANIFEST not in names:
-            raise RuntimeError("wheel is missing the packaged demo manifest")
-        if (
-            hashlib.sha256(archive.read("alma3/examples/example_dataset.csv.gz")).hexdigest()
-            != DEMO_GZIP_SHA256
-        ):
-            raise RuntimeError("wheel demo SHA-256 mismatch")
-        if hashlib.sha256(archive.read(DEMO_MANIFEST)).hexdigest() != DEMO_MANIFEST_SHA256:
-            raise RuntimeError("wheel demo manifest SHA-256 mismatch")
-        if BEDMETHYL_TARGET not in names:
-            raise RuntimeError("wheel is missing the release-bound BedMethyl target")
-        target_gzip = archive.read(BEDMETHYL_TARGET)
-        if hashlib.sha256(target_gzip).hexdigest() != BEDMETHYL_TARGET_GZIP_SHA256:
-            raise RuntimeError("wheel BedMethyl target gzip SHA-256 mismatch")
-        try:
-            target = gzip.decompress(target_gzip)
-        except (OSError, EOFError) as error:
-            raise RuntimeError("wheel BedMethyl target is not valid gzip") from error
-        if hashlib.sha256(target).hexdigest() != BEDMETHYL_TARGET_SHA256:
-            raise RuntimeError("wheel BedMethyl target SHA-256 mismatch")
-        if len(target.splitlines()) != BEDMETHYL_TARGET_CPG_COUNT:
-            raise RuntimeError("wheel BedMethyl target row count mismatch")
-        for info in archive.infolist():
-            name = info.filename.lower()
-            if Path(name).suffix in FORBIDDEN_NAMES:
-                raise RuntimeError(f"wheel contains forbidden binary: {info.filename}")
-            if info.file_size <= 2 * 1024 * 1024:
-                content = archive.read(info).lower()
-                for forbidden in FORBIDDEN_TEXT:
-                    if forbidden in content:
-                        raise RuntimeError(f"wheel contains forbidden text {forbidden!r}: {info.filename}")
-
-
 def runtime_contract(package_root: Path) -> str:
     sys.path.insert(0, str(ROOT / "src"))
     from alma3.hashes import runtime_contract_sha256
@@ -272,68 +209,7 @@ def runtime_contract(package_root: Path) -> str:
     return runtime_contract_sha256(package_root)
 
 
-def inspect_paired_results(jsonl: Path, csv_path: Path, manifest_path: Path | None = None) -> None:
-    sys.path.insert(0, str(ROOT / "src"))
-    from alma3.clinical_result import validate_result
-    from alma3.infer import _RESULT_CSV_FIELDS, _result_csv_row
-
-    json_rows = [
-        json.loads(line)
-        for line in jsonl.read_text(encoding="utf-8").splitlines()
-    ]
-    with csv_path.open(encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle)
-        csv_rows = list(reader)
-    if tuple(reader.fieldnames or ()) != _RESULT_CSV_FIELDS:
-        raise RuntimeError("paired demo CSV header does not match the 45-column contract")
-    if not json_rows or len(json_rows) != len(csv_rows):
-        raise RuntimeError("paired demo outputs are empty or have different row counts")
-    for row in json_rows:
-        validate_result(row)
-    expected_csv_rows = [
-        {
-            field: "" if value == "" else str(value)
-            for field, value in _result_csv_row(row).items()
-        }
-        for row in json_rows
-    ]
-    if expected_csv_rows != csv_rows:
-        raise RuntimeError("paired JSONL and CSV demo results are inconsistent")
-    if manifest_path is None:
-        return
-    expected = json.loads(manifest_path.read_text(encoding="utf-8"))["samples"]
-    observed = [
-        {
-            "sample_id": row["sample_id"],
-            "observed_cpg_count": row["observed_cpg_count"],
-            "expected_status": row["status"],
-            "accepted_level": None if row["accepted"] is None else row["accepted"]["level"],
-            "accepted_classification": (
-                None if row["accepted"] is None else row["accepted"]["classification"]
-            ),
-            "unresolved_level": None if row["decision"] is None else row["decision"]["level"],
-            "result_summary": row["result_summary"],
-        }
-        for row in json_rows
-    ]
-    expected = [
-        {key: value for key, value in row.items() if key != "selection_role"}
-        for row in expected
-    ]
-    if observed != expected:
-        raise RuntimeError("demo results disagree with the packaged manifest")
-
-
-def inspect_release_catalog(release: Path) -> dict[str, Any]:
-    sys.path.insert(0, str(ROOT / "src"))
-    from alma3.download import _release_spec, _validate_catalog_files
-    from alma3.release import validate_release
-
-    _validate_catalog_files(release, _release_spec())
-    return validate_release(release, device="cpu", load_model=False)
-
-
-def inspect_demo(release: Path) -> None:
+def inspect_demo(release: Path) -> Path:
     sys.path.insert(0, str(ROOT / "src"))
     from alma3.infer import _array_csv_batches, demo_path
     from alma3.release import validate_release
@@ -347,20 +223,20 @@ def inspect_demo(release: Path) -> None:
     if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != DEMO_MANIFEST_SHA256:
         raise RuntimeError("packaged demo manifest SHA-256 mismatch")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest["kind"] != "alma3_demo_dataset_manifest" or manifest["schema_version"] != 1:
+    if manifest.get("kind") != "alma3_demo_dataset_manifest" or manifest.get("schema_version") != 1:
         raise RuntimeError("packaged demo manifest contract is invalid")
-    dataset = manifest["dataset"]
+    dataset = manifest.get("dataset", {})
     if (
-        dataset["compressed_sha256"] != DEMO_GZIP_SHA256
-        or dataset["compressed_bytes"] != len(payload)
-        or dataset["sample_count"] != 16
-        or dataset["cpg_count"] != 65_536
+        dataset.get("compressed_sha256") != DEMO_GZIP_SHA256
+        or dataset.get("compressed_bytes") != len(payload)
+        or dataset.get("sample_count") != 16
+        or dataset.get("cpg_count") != 65_536
         or len(payload) > 2_500_000
     ):
         raise RuntimeError("packaged demo metadata is invalid")
     with gzip.GzipFile(fileobj=io.BytesIO(payload), mode="rb") as handle:
         decompressed = handle.read()
-    if hashlib.sha256(decompressed).hexdigest() != dataset["decompressed_sha256"]:
+    if hashlib.sha256(decompressed).hexdigest() != dataset.get("decompressed_sha256"):
         raise RuntimeError("packaged demo decompressed SHA-256 mismatch")
     deterministic = io.BytesIO()
     with gzip.GzipFile(filename="", fileobj=deterministic, mode="wb", compresslevel=9, mtime=0) as handle:
@@ -375,7 +251,7 @@ def inspect_demo(release: Path) -> None:
         "cpg_manifest_sha256": validated["hashes"]["cpg_manifest.json"],
         "thresholds_sha256": validated["hashes"]["thresholds.json"],
     }
-    if manifest["release"] != expected_release:
+    if manifest.get("release") != expected_release:
         raise RuntimeError("packaged demo is bound to a different release")
     reader = csv.reader(io.StringIO(decompressed.decode("utf-8"), newline=""))
     header = next(reader)
@@ -385,13 +261,13 @@ def inspect_demo(release: Path) -> None:
     expected_ids = [f"demo_{index:02d}" for index in range(1, 17)]
     if [row[0] for row in rows] != expected_ids or any(len(row) != len(header) for row in rows):
         raise RuntimeError("packaged demo sample rows are invalid")
-    parsed = []
+    parsed: list[tuple[str, int, int]] = []
     for sample_ids, _, observed, summary in _array_csv_batches(
-            demo_path(),
-            validated["cpg"],
-            input_values="beta",
-            minimum_observed_cpgs=int(validated["thresholds"]["minimum_observed_cpgs"]),
-        ):
+        path,
+        validated["cpg"],
+        input_values="beta",
+        minimum_observed_cpgs=int(validated["thresholds"]["minimum_observed_cpgs"]),
+    ):
         parsed.extend(
             (sample_id, int(mask.sum().item()), clipped)
             for sample_id, mask, clipped in zip(
@@ -406,17 +282,53 @@ def inspect_demo(release: Path) -> None:
     public_text = decompressed.decode("utf-8") + manifest_path.read_text(encoding="utf-8")
     if re.search(r"(?:GSE|GSM|E-MTAB-)[0-9]+", public_text, flags=re.IGNORECASE):
         raise RuntimeError("packaged demo exposes a source accession")
+    return manifest_path
+
+
+def inspect_demo_results(jsonl: Path, manifest_path: Path) -> None:
+    sys.path.insert(0, str(ROOT / "src"))
+    from alma3.clinical_result import validate_result
+
+    rows = [json.loads(line) for line in jsonl.read_text(encoding="utf-8").splitlines()]
+    if len(rows) != 16:
+        raise RuntimeError("demo output must contain exactly 16 results")
+    for row in rows:
+        validate_result(row)
+    observed = [
+        {
+            "sample_id": row["sample_id"],
+            "observed_cpg_count": row["observed_cpg_count"],
+            "expected_status": row["status"],
+            "accepted_level": None if row["accepted"] is None else row["accepted"]["level"],
+            "accepted_classification": (
+                None if row["accepted"] is None else row["accepted"]["classification"]
+            ),
+            "unresolved_level": None if row["decision"] is None else row["decision"]["level"],
+            "result_summary": row["result_summary"],
+        }
+        for row in rows
+    ]
+    expected = json.loads(manifest_path.read_text(encoding="utf-8"))["samples"]
+    expected = [
+        {key: value for key, value in row.items() if key != "selection_role"}
+        for row in expected
+    ]
+    if observed != expected:
+        raise RuntimeError("demo results disagree with the packaged manifest")
 
 
 def _release_identity(release: Path) -> dict[str, Any]:
     sys.path.insert(0, str(ROOT / "src"))
-    from alma3.download import _release_spec
+    from alma3.hashes import sha256_file
+    from alma3.release import RELEASE_FILES, validate_release
 
-    validated = inspect_release_catalog(release)
-    spec = _release_spec()
+    validated = validate_release(release, device="cpu", load_model=False)
     return {
         "cpg_manifest_sha256": validated["hashes"]["cpg_manifest.json"],
-        "files": spec["files"],
+        "files": {
+            name: {"sha256": sha256_file(release / name), "size": (release / name).stat().st_size}
+            for name in sorted(RELEASE_FILES)
+        },
         "manifest_sha256": validated["manifest_sha256"],
         "model_sha256": validated["hashes"]["model.safetensors"],
         "release_metadata": validated["release"],
@@ -434,13 +346,10 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
         raise RuntimeError("release candidate must not contain symbolic links")
     files = {path.relative_to(candidate).as_posix() for path in paths if path.is_file()}
     directories = {path.relative_to(candidate).as_posix() for path in paths if path.is_dir()}
-    if directories != {"image", "wheel"}:
+    if directories != {"image"}:
         raise RuntimeError("release candidate directory layout is invalid")
-    wheel_names = sorted(name for name in files if name.startswith("wheel/") and name.endswith(".whl"))
-    image_names = sorted(name for name in files if name.startswith("image/") and name.endswith(".tar"))
-    if len(wheel_names) != 1 or image_names != ["image/alma3-3.0.0-cpu.tar"]:
-        raise RuntimeError("release candidate payload layout is invalid")
-    payloads = {"acceptance.json", wheel_names[0], image_names[0]}
+    image_name = "image/alma3-3.0.0-cpu.tar"
+    payloads = {"acceptance.json", image_name}
     if files != payloads | {"SHA256SUMS.json", CANDIDATE_MARKER}:
         raise RuntimeError("release candidate file set is invalid")
     if (candidate / CANDIDATE_MARKER).read_bytes() != b"complete\n":
@@ -465,25 +374,24 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
         or acceptance.get("status") != "passed"
     ):
         raise RuntimeError("release candidate acceptance record has the wrong contract")
-    if acceptance.get("wheel", {}).get("sha256") != manifest[wheel_names[0]]:
-        raise RuntimeError("release candidate wheel binding is invalid")
     image = acceptance.get("image", {})
-    if image.get("archive_sha256") != manifest[image_names[0]]:
+    if image.get("archive_sha256") != manifest[image_name]:
         raise RuntimeError("release candidate image archive binding is invalid")
-    if _archive_config_id(candidate / image_names[0]) != image.get("archive_config_id"):
-        raise RuntimeError("release candidate Docker archive config ID is invalid")
-    inspect_wheel(candidate / wheel_names[0])
+    if _archive_config_id(candidate / image_name) != image.get("image_id"):
+        raise RuntimeError("release candidate Docker archive image ID is invalid")
     return acceptance
 
 
 def _expected_candidate_name(source: dict[str, Any], release_identity: dict[str, Any]) -> str:
-    return f"alma3-3.0.0-rc-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}"
+    return (
+        f"alma3-3.0.0-docker-{source['commit'][:8]}-"
+        f"{release_identity['manifest_sha256'][:8]}"
+    )
 
 
 def _seal_candidate(
     output: Path,
     *,
-    wheel: Path,
     image_tag: str,
     source: dict[str, Any],
     source_contract: str,
@@ -500,34 +408,36 @@ def _seal_candidate(
     if output_resolved == release or output_resolved.is_relative_to(release):
         raise RuntimeError("release candidate output must be outside the release artifact")
 
-    image_identity = _image_identity(image_tag)
+    image_identity = _image_identity(image_tag, source["commit"])
     with _atomic_candidate(output) as temporary:
-        wheel_output = temporary / "wheel" / wheel.name
-        wheel_sha256 = _copy_new(wheel, wheel_output)
         image_output = temporary / "image" / "alma3-3.0.0-cpu.tar"
         image_output.parent.mkdir(parents=True)
         run(["docker", "image", "save", "--output", str(image_output), image_tag])
         with image_output.open("rb") as handle:
             os.fsync(handle.fileno())
-        _fsync_directory(wheel_output.parent)
         _fsync_directory(image_output.parent)
         image_archive_sha256 = _sha256(image_output)
-        archive_config_id = _archive_config_id(image_output)
-        run(["docker", "image", "load", "--input", str(image_output)])
-        if _image_identity(image_tag) != image_identity:
+        if _archive_config_id(image_output) != image_identity["image_id"]:
             raise RuntimeError("saved Docker archive differs from the tested image")
+        run(["docker", "image", "load", "--input", str(image_output)])
+        if _image_identity(image_tag, source["commit"]) != image_identity:
+            raise RuntimeError("Docker archive round trip changed the tested image")
 
+        publication_tags = [
+            f"{PUBLIC_IMAGE}:3.0.0",
+            f"{PUBLIC_IMAGE}:3.0.0-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}",
+        ]
         acceptance = {
             "citation": citation,
             "image": {
                 **image_identity,
-                "archive_config_id": archive_config_id,
                 "archive_bytes": image_output.stat().st_size,
                 "archive_sha256": image_archive_sha256,
                 "archive_round_trip_verified": True,
                 "cpu_only": True,
                 "embedded_release_verified": True,
                 "network_disabled_demo_passed": True,
+                "publication_tags": publication_tags,
             },
             "kind": CANDIDATE_KIND,
             "publication": {
@@ -542,22 +452,15 @@ def _seal_candidate(
             "source": source,
             "status": "passed",
             "verification": {
-                "docker_matrix": sorted(PYTHON_IMAGES),
                 "lint_passed": True,
+                "python": f"{sys.version_info.major}.{sys.version_info.minor}",
                 "unit_tests_passed": True,
-            },
-            "wheel": {
-                "bytes": wheel_output.stat().st_size,
-                "filename": wheel.name,
-                "sha256": wheel_sha256,
-                "weight_free": True,
             },
         }
         _write_new(temporary / "acceptance.json", _canonical_json(acceptance))
         checksums = {
             "acceptance.json": _sha256(temporary / "acceptance.json"),
-            f"image/{image_output.name}": image_archive_sha256,
-            f"wheel/{wheel_output.name}": wheel_sha256,
+            "image/alma3-3.0.0-cpu.tar": image_archive_sha256,
         }
         _write_new(temporary / "SHA256SUMS.json", _canonical_json(checksums))
         for name, expected in checksums.items():
@@ -570,7 +473,7 @@ def _seal_candidate(
             raise RuntimeError("release artifact changed during the release gate")
         if _citation_value() != citation:
             raise RuntimeError("README citation changed during the release gate")
-        if _image_identity(image_tag) != image_identity:
+        if _image_identity(image_tag, source["commit"]) != image_identity:
             raise RuntimeError("tested Docker image changed before publication")
 
         _write_new(temporary / CANDIDATE_MARKER, b"complete\n")
@@ -578,203 +481,112 @@ def _seal_candidate(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run the local ALMA3 release gate.")
-    parser.add_argument("--release-artifact", type=Path)
-    parser.add_argument("--output", type=Path, help="Preserve the exact tested wheel and standalone image")
-    parser.add_argument("--skip-docker-matrix", action="store_true")
+    parser = argparse.ArgumentParser(description="Build and seal the ALMA3 CPU Docker release candidate.")
+    parser.add_argument("--release-artifact", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    if args.output is not None and args.release_artifact is None:
-        parser.error("--output requires --release-artifact")
-    if args.output is not None and args.skip_docker_matrix:
-        parser.error("a preserved release candidate requires the complete Docker matrix")
-    if args.output is not None:
-        args.output = args.output.resolve()
+    release = args.release_artifact.resolve()
+    output = args.output.resolve()
 
-    source_identity = None
-    release_identity = None
-    citation = None
-    if args.output is not None:
-        source_identity = _source_identity()
-        release_identity = _release_identity(args.release_artifact.resolve())
-        citation = _citation_value()
-        expected_name = _expected_candidate_name(source_identity, release_identity)
-        if args.output.name != expected_name:
-            parser.error(f"--output must end with {expected_name}")
-        if args.output.exists() or args.output.is_symlink():
-            parser.error(f"--output already exists: {args.output}")
+    source = _source_identity()
+    release_identity = _release_identity(release)
+    citation = _citation_value()
+    expected_name = _expected_candidate_name(source, release_identity)
+    if output.name != expected_name:
+        parser.error(f"--output must end with {expected_name}")
+    if output.exists() or output.is_symlink():
+        parser.error(f"--output already exists: {output}")
 
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(ROOT / "src")
     ruff = shutil.which("ruff")
-    if args.output is not None and ruff is None:
-        raise RuntimeError("a preserved release candidate requires ruff")
-    if ruff:
-        run([ruff, "check", "src", "tests"])
+    if ruff is None:
+        raise RuntimeError("release candidate requires ruff")
+    run([ruff, "check", "src", "tests"])
     run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], env=environment)
 
-    with tempfile.TemporaryDirectory(prefix="alma3-release-gate-") as raw:
-        source_contract = runtime_contract(ROOT / "src" / "alma3")
-        wheel_dir = Path(raw) / "wheel"
-        wheel_dir.mkdir()
+    source_contract = runtime_contract(ROOT / "src" / "alma3")
+    manifest_path = inspect_demo(release)
+    image_tag = f"{PUBLIC_IMAGE}:3.0.0-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}"
+    run(
+        [
+            "docker",
+            "build",
+            "--platform",
+            "linux/amd64",
+            "--build-context",
+            f"alma3_release={release}",
+            "--label",
+            "org.opencontainers.image.title=ALMA3",
+            "--label",
+            "org.opencontainers.image.source=https://github.com/almagx/alma3",
+            "--label",
+            f"org.opencontainers.image.revision={source['commit']}",
+            "--label",
+            "org.opencontainers.image.version=3.0.0",
+            "-t",
+            image_tag,
+            ".",
+        ]
+    )
+    _image_identity(image_tag, source["commit"])
+    run(["docker", "run", "--rm", "--network", "none", image_tag, "verify-release"])
+    run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--entrypoint",
+            "python",
+            "-e",
+            f"ALMA3_RUNTIME_CONTRACT_SHA256={source_contract}",
+            image_tag,
+            "-c",
+            (
+                "import importlib.util, os, torch; "
+                "from alma3.hashes import runtime_contract_sha256; "
+                "assert torch.version.cuda is None; "
+                "assert 'USE_MKL=ON' in torch.__config__.show(); "
+                "assert importlib.util.find_spec('pacmap') is None; "
+                "assert importlib.util.find_spec('faiss') is None; "
+                "assert runtime_contract_sha256() == os.environ['ALMA3_RUNTIME_CONTRACT_SHA256']"
+            ),
+        ]
+    )
+    with tempfile.TemporaryDirectory(prefix="alma3-docker-release-gate-") as raw:
+        output_user = f"{os.getuid()}:{os.getgid()}"
+        demo_output = Path(raw) / "alma3-demo.jsonl"
         run(
             [
-                sys.executable,
-                "-m",
-                "pip",
-                "wheel",
-                "--no-deps",
-                "--no-build-isolation",
-                "--wheel-dir",
-                str(wheel_dir),
-                ".",
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                output_user,
+                "-v",
+                f"{raw}:/out",
+                image_tag,
+                "demo",
+                "-o",
+                "/out/alma3-demo.jsonl",
             ]
         )
-        wheels = list(wheel_dir.glob("alma3-3.0.0-*.whl"))
-        if len(wheels) != 1:
-            raise RuntimeError("release gate did not build exactly one ALMA3 3.0.0 wheel")
-        inspect_wheel(wheels[0])
-        wheel_root = Path(raw) / "wheel-root"
-        with zipfile.ZipFile(wheels[0]) as archive:
-            archive.extractall(wheel_root)
-        wheel_contract = runtime_contract(wheel_root / "alma3")
-        if wheel_contract != source_contract:
-            raise RuntimeError(
-                f"wheel runtime contract differs from source: {wheel_contract} != {source_contract}"
-            )
+        inspect_demo_results(demo_output, manifest_path)
 
-        if not args.skip_docker_matrix:
-            for version, image in PYTHON_IMAGES.items():
-                tag = f"alma3-runtime:3.0.0-py{version.replace('.', '')}-rc"
-                command = ["docker", "build", "--target", "runtime", "-t", tag]
-                if image is not None:
-                    command.extend(["--build-arg", f"PYTHON_IMAGE={image}"])
-                command.append(".")
-                run(command)
-                run(
-                    [
-                        "docker",
-                        "run",
-                        "--rm",
-                        "--user",
-                        "0:0",
-                        "--entrypoint",
-                        "sh",
-                        "-e",
-                        f"ALMA3_RUNTIME_CONTRACT_SHA256={source_contract}",
-                        "-v",
-                        f"{wheel_dir}:/wheel:ro",
-                        tag,
-                        "-c",
-                        (
-                            "python -m pip uninstall -y alma3 >/dev/null && "
-                            "python -m pip install --no-deps /wheel/alma3-3.0.0-*.whl >/dev/null && "
-                            "alma3 --version && python -m alma3 --version && "
-                            "python -c 'import os; from alma3.hashes import runtime_contract_sha256; "
-                            "actual = runtime_contract_sha256(); "
-                            "expected = os.environ[\"ALMA3_RUNTIME_CONTRACT_SHA256\"]; "
-                            "assert actual == expected, (actual, expected)'"
-                        ),
-                    ]
-                )
-
-        if args.release_artifact is not None:
-            release = args.release_artifact.resolve()
-            output_user = f"{os.getuid()}:{os.getgid()}"
-            inspect_release_catalog(release)
-            inspect_demo(release)
-            image_tag = (
-                f"alma3:3.0.0-rc-{source_identity['commit'][:8]}-"
-                f"{release_identity['manifest_sha256'][:8]}"
-                if source_identity is not None and release_identity is not None
-                else "alma3:3.0.0-rc"
-            )
-            run(
-                [
-                    "docker",
-                    "build",
-                    "--build-context",
-                    f"alma3_release={release}",
-                    "-t",
-                    image_tag,
-                    ".",
-                ]
-            )
-            run(["docker", "run", "--rm", "--network", "none", image_tag, "verify-release"])
-            run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "--network",
-                    "none",
-                    "--entrypoint",
-                    "python",
-                    "-e",
-                    f"ALMA3_RUNTIME_CONTRACT_SHA256={source_contract}",
-                    image_tag,
-                    "-c",
-                    (
-                        "import os; from alma3.hashes import runtime_contract_sha256; "
-                        "actual = runtime_contract_sha256(); "
-                        "expected = os.environ['ALMA3_RUNTIME_CONTRACT_SHA256']; "
-                        "assert actual == expected, (actual, expected)"
-                    ),
-                ]
-            )
-            run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "--network",
-                    "none",
-                    "--user",
-                    output_user,
-                    "--workdir",
-                    "/out",
-                    "-v",
-                    f"{raw}:/out",
-                    image_tag,
-                    "demo",
-                ]
-            )
-            run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    "--network",
-                    "none",
-                    "--user",
-                    output_user,
-                    "-v",
-                    f"{raw}:/out",
-                    image_tag,
-                    "demo",
-                    "-o",
-                    "/out/alma3-demo.jsonl",
-                ]
-            )
-            inspect_paired_results(
-                Path(raw) / "alma3-demo.jsonl",
-                Path(raw) / "alma3-demo.csv",
-                ROOT / "src" / "alma3" / "examples" / "example_dataset.manifest.json",
-            )
-            if args.output is not None:
-                assert source_identity is not None
-                assert release_identity is not None
-                assert citation is not None
-                _seal_candidate(
-                    args.output,
-                    wheel=wheels[0],
-                    image_tag=image_tag,
-                    source=source_identity,
-                    source_contract=source_contract,
-                    release=release,
-                    release_identity=release_identity,
-                    citation=citation,
-                )
-    print("ALMA3 release gate passed", flush=True)
+    _seal_candidate(
+        output,
+        image_tag=image_tag,
+        source=source,
+        source_contract=source_contract,
+        release=release,
+        release_identity=release_identity,
+        citation=citation,
+    )
+    print(f"ALMA3 Docker release candidate sealed: {output}", flush=True)
     return 0
 
 

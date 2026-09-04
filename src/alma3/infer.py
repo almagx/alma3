@@ -734,7 +734,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--artifact",
-        help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
+        help="release directory; otherwise use ALMA3_RELEASE",
     )
     parser.add_argument(
         "-i",
@@ -802,7 +802,7 @@ def demo_main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--artifact",
-        help="release directory; otherwise use ALMA3_RELEASE, the verified cache, or automatic download",
+        help="release directory; otherwise use ALMA3_RELEASE",
     )
     parser.add_argument("-o", "--output", default="alma3-demo.csv", help="new demo CSV or JSONL output file")
     parser.add_argument("--device", default="auto", help="inference device: auto, cpu, cuda, or cuda:<index>")

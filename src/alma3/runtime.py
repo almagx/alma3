@@ -11,8 +11,8 @@ import torch
 
 from . import __version__
 from .clinical_result import results_from_logits, validate_sample_id
-from .download import load_release
 from .hashes import runtime_contract_sha256
+from .release import load_release
 from .sitewise import real_coverage_presentation
 
 DEFAULT_BATCH_SIZE = 2
@@ -175,7 +175,7 @@ class ALMA3:
     """Load one ALMA3-Dx release and reuse it for one or many samples."""
 
     def __init__(self, artifact: str | Path | None = None, *, device: str = "auto") -> None:
-        """Load a release from an explicit path, configured path, cache, or verified download."""
+        """Load an explicit release or the release configured by ALMA3_RELEASE."""
 
         self.device = resolve_device(device)
         _require_supported_cpu_build(self.device)

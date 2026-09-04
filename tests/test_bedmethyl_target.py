@@ -22,7 +22,7 @@ from alma3.bedmethyl_target import (
     export_bedmethyl_target,
     main,
 )
-from alma3.download import load_release
+from alma3.release import load_release
 
 
 def _small_reference(root: Path, sequence: bytes = b"AACGAACGAA") -> Path:
@@ -152,7 +152,7 @@ class BedMethylTargetTests(unittest.TestCase):
                 export_bedmethyl_target(reference, root / "target.bed", artifact=release)
 
     def test_load_release_can_skip_model_loading(self) -> None:
-        with patch("alma3.download.validate_release", return_value={}) as validate:
+        with patch("alma3.release.validate_release", return_value={}) as validate:
             load_release("release", load_model=False)
         validate.assert_called_once_with(Path("release"), device="cpu", load_model=False)
 

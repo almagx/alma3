@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://models.almagx.com/schemas/alma3-release-v1.json",
+  "$id": "https://almagenomics.com/schemas/alma3/release.schema.json",
   "title": "ALMA3 release metadata",
   "type": "object",
   "additionalProperties": false,
