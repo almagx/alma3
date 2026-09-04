@@ -74,6 +74,7 @@ class ReleaseGateCandidateTests(unittest.TestCase):
             image_id = _write_docker_archive(image)
             acceptance = {
                 "image": {
+                    "archive_config_id": image_id,
                     "archive_sha256": GATE["_sha256"](image),
                     "image_id": image_id,
                 },

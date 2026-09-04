@@ -377,8 +377,8 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
     image = acceptance.get("image", {})
     if image.get("archive_sha256") != manifest[image_name]:
         raise RuntimeError("release candidate image archive binding is invalid")
-    if _archive_config_id(candidate / image_name) != image.get("image_id"):
-        raise RuntimeError("release candidate Docker archive image ID is invalid")
+    if _archive_config_id(candidate / image_name) != image.get("archive_config_id"):
+        raise RuntimeError("release candidate Docker archive config ID is invalid")
     return acceptance
 
 
@@ -417,8 +417,7 @@ def _seal_candidate(
             os.fsync(handle.fileno())
         _fsync_directory(image_output.parent)
         image_archive_sha256 = _sha256(image_output)
-        if _archive_config_id(image_output) != image_identity["image_id"]:
-            raise RuntimeError("saved Docker archive differs from the tested image")
+        archive_config_id = _archive_config_id(image_output)
         run(["docker", "image", "load", "--input", str(image_output)])
         if _image_identity(image_tag, source["commit"]) != image_identity:
             raise RuntimeError("Docker archive round trip changed the tested image")
@@ -431,6 +430,7 @@ def _seal_candidate(
             "citation": citation,
             "image": {
                 **image_identity,
+                "archive_config_id": archive_config_id,
                 "archive_bytes": image_output.stat().st_size,
                 "archive_sha256": image_archive_sha256,
                 "archive_round_trip_verified": True,
