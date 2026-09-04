@@ -1151,7 +1151,7 @@ class RuntimeContractTests(unittest.TestCase):
             "--output",
             "result.jsonl",
         ]
-        with patch("alma3.infer.run_inference") as run:
+        with patch("alma3.infer.run_inference") as run, redirect_stderr(StringIO()):
             self.assertEqual(infer_main(arguments), 0)
             run.assert_called_once_with(
                 "release",
@@ -1165,7 +1165,7 @@ class RuntimeContractTests(unittest.TestCase):
                 progress=False,
             )
         automatic = [item for item in arguments if item not in {"--artifact", "release"}]
-        with patch("alma3.infer.run_inference") as run:
+        with patch("alma3.infer.run_inference") as run, redirect_stderr(StringIO()):
             self.assertEqual(infer_main([*automatic, "--batch-size", "8", "--device", "cuda:1"]), 0)
             run.assert_called_once_with(
                 None,
@@ -1179,7 +1179,7 @@ class RuntimeContractTests(unittest.TestCase):
                 progress=False,
             )
         inferred = ["-i", "input.csv.gz", "-o", "result.jsonl", "--input-values", "mvalue"]
-        with patch("alma3.infer.run_inference") as run:
+        with patch("alma3.infer.run_inference") as run, redirect_stderr(StringIO()):
             self.assertEqual(infer_main(inferred), 0)
             run.assert_called_once_with(
                 None,
@@ -1193,7 +1193,7 @@ class RuntimeContractTests(unittest.TestCase):
                 progress=False,
             )
         bedmethyl = ["-i", "sample.bed", "-o", "result.jsonl"]
-        with patch("alma3.infer.run_inference") as run:
+        with patch("alma3.infer.run_inference") as run, redirect_stderr(StringIO()):
             self.assertEqual(infer_main(bedmethyl), 0)
             run.assert_called_once_with(
                 None,
@@ -1225,7 +1225,7 @@ class RuntimeContractTests(unittest.TestCase):
                 infer_main([*arguments, removed])
 
     def test_demo_cli_uses_packaged_input_and_new_only_default_output(self) -> None:
-        with patch("alma3.infer.run_inference") as run:
+        with patch("alma3.infer.run_inference") as run, redirect_stderr(StringIO()):
             self.assertEqual(demo_main([]), 0)
             run.assert_called_once_with(
                 None,
