@@ -591,13 +591,17 @@ class ClinicalResultContractTests(unittest.TestCase):
             ),
             (
                 _result(unresolved_level="presence"),
-                "Tumor presence unresolved. Leading candidate: absent "
-                "(59.9% confidence; threshold 80.0%).",
+                (
+                    "Tumor presence unresolved. Leading candidate: absent "
+                    "(59.9% confidence; threshold 80.0%)."
+                ),
             ),
             (
                 _result(unresolved_level="lineage"),
-                "Tumor detected (100.0% confidence). Lineage unresolved. "
-                "Leading candidate: myeloid (59.9% confidence; threshold 80.0%).",
+                (
+                    "Tumor detected (100.0% confidence). Lineage unresolved. "
+                    "Leading candidate: myeloid (59.9% confidence; threshold 80.0%)."
+                ),
             ),
         )
         for result, legacy_summary in cases:
