@@ -173,7 +173,7 @@ def _citation_value() -> str:
 
 def _image_identity(tag: str) -> dict[str, Any]:
     completed = subprocess.run(
-        ["docker", "image", "inspect", tag],
+        ["docker", "image", "inspect", "--platform", "linux/amd64", tag],
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -202,7 +202,7 @@ def _image_identity(tag: str) -> dict[str, Any]:
     return identity
 
 
-def _archive_image_id(path: Path) -> str:
+def _archive_config_id(path: Path) -> str:
     with tarfile.open(path, mode="r") as archive:
         try:
             manifest_file = archive.extractfile("manifest.json")
@@ -470,8 +470,8 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
     image = acceptance.get("image", {})
     if image.get("archive_sha256") != manifest[image_names[0]]:
         raise RuntimeError("release candidate image archive binding is invalid")
-    if _archive_image_id(candidate / image_names[0]) != image.get("image_id"):
-        raise RuntimeError("release candidate Docker archive image ID is invalid")
+    if _archive_config_id(candidate / image_names[0]) != image.get("archive_config_id"):
+        raise RuntimeError("release candidate Docker archive config ID is invalid")
     inspect_wheel(candidate / wheel_names[0])
     return acceptance
 
@@ -512,15 +512,19 @@ def _seal_candidate(
         _fsync_directory(wheel_output.parent)
         _fsync_directory(image_output.parent)
         image_archive_sha256 = _sha256(image_output)
-        if _archive_image_id(image_output) != image_identity["image_id"]:
+        archive_config_id = _archive_config_id(image_output)
+        run(["docker", "image", "load", "--input", str(image_output)])
+        if _image_identity(image_tag) != image_identity:
             raise RuntimeError("saved Docker archive differs from the tested image")
 
         acceptance = {
             "citation": citation,
             "image": {
                 **image_identity,
+                "archive_config_id": archive_config_id,
                 "archive_bytes": image_output.stat().st_size,
                 "archive_sha256": image_archive_sha256,
+                "archive_round_trip_verified": True,
                 "cpu_only": True,
                 "embedded_release_verified": True,
                 "network_disabled_demo_passed": True,

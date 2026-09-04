@@ -60,11 +60,11 @@ class ReleaseGateCandidateTests(unittest.TestCase):
             self.assertFalse(output.exists())
             self.assertEqual(list(root.glob(".candidate.tmp-*")), [])
 
-    def test_archive_image_id_is_bound_to_config_bytes(self) -> None:
+    def test_archive_config_id_is_bound_to_config_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             archive = Path(raw) / "image.tar"
             expected = _write_docker_archive(archive)
-            self.assertEqual(GATE["_archive_image_id"](archive), expected)
+            self.assertEqual(GATE["_archive_config_id"](archive), expected)
 
     def test_candidate_verifier_rejects_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -76,7 +76,11 @@ class ReleaseGateCandidateTests(unittest.TestCase):
             wheel.write_bytes(b"synthetic wheel")
             image_id = _write_docker_archive(image)
             acceptance = {
-                "image": {"archive_sha256": GATE["_sha256"](image), "image_id": image_id},
+                "image": {
+                    "archive_config_id": image_id,
+                    "archive_sha256": GATE["_sha256"](image),
+                    "image_id": "sha256:" + "a" * 64,
+                },
                 "kind": GATE["CANDIDATE_KIND"],
                 "schema_version": GATE["CANDIDATE_SCHEMA_VERSION"],
                 "status": "passed",
