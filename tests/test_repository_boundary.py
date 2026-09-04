@@ -14,6 +14,28 @@ class RepositoryBoundaryTests(unittest.TestCase):
         license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
         self.assertTrue(license_text.startswith(RELEASE_LICENSE_HEADER))
 
+    def test_software_citation_matches_public_release(self) -> None:
+        citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+        for required in (
+            "cff-version: 1.2.0",
+            'type: software',
+            'title: "ALMA3"',
+            'version: "3.0.0"',
+            'date-released: "2026-09-04"',
+            '- name: "ALMA Genomics Inc."',
+            'repository-code: "https://github.com/almagx/alma3"',
+            'url: "https://almagx.com/atlas"',
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, citation)
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "ALMA Genomics Inc. (2026). ALMA3 (Version 3.0.0) [Computer software].",
+            readme,
+        )
+        self.assertIn("Manuscript in preparation.", readme)
+
     def test_source_tree_is_inference_only(self) -> None:
         modules = {
             path.name

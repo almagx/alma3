@@ -152,7 +152,9 @@ CSV is easiest to read and share; JSONL provides the same result in a structured
 
 <details><summary><strong>Citation</strong></summary>
 
-Manuscript in preparation. Contact us for research collaborations.
+ALMA Genomics Inc. (2026). ALMA3 (Version 3.0.0) [Computer software]. https://github.com/almagx/alma3
+
+Manuscript in preparation.
 
 </details>
 

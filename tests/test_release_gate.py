@@ -108,10 +108,12 @@ class ReleaseGateCandidateTests(unittest.TestCase):
             "alma3-3.0.0-docker-aaaaaaaa-bbbbbbbb",
         )
 
-    def test_current_citation_matches_readme_notice(self) -> None:
+    def test_current_citation_matches_software_citation(self) -> None:
         self.assertEqual(
             GATE["_citation_value"](),
-            "Manuscript in preparation. Contact us for research collaborations.",
+            "ALMA Genomics Inc. (2026). ALMA3 (Version 3.0.0) [Computer software]. "
+            "https://github.com/almagx/alma3\n\n"
+            "Manuscript in preparation.",
         )
 
 
