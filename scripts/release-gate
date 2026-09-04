@@ -499,10 +499,7 @@ def main() -> int:
 
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(ROOT / "src")
-    ruff = shutil.which("ruff")
-    if ruff is None:
-        raise RuntimeError("release candidate requires ruff")
-    run([ruff, "check", "src", "tests"])
+    run([sys.executable, "-m", "ruff", "check", "src", "tests"])
     run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], env=environment)
 
     source_contract = runtime_contract(ROOT / "src" / "alma3")
