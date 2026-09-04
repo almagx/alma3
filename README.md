@@ -152,7 +152,7 @@ CSV is easiest to read and share; JSONL provides the same result in a structured
 
 <details><summary><strong>Citation</strong></summary>
 
-TBD
+Manuscript in preparation. Contact us for research collaborations.
 
 </details>
 

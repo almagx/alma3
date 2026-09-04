@@ -108,8 +108,11 @@ class ReleaseGateCandidateTests(unittest.TestCase):
             "alma3-3.0.0-docker-aaaaaaaa-bbbbbbbb",
         )
 
-    def test_current_citation_remains_tbd(self) -> None:
-        self.assertEqual(GATE["_citation_value"](), "TBD")
+    def test_current_citation_matches_readme_notice(self) -> None:
+        self.assertEqual(
+            GATE["_citation_value"](),
+            "Manuscript in preparation. Contact us for research collaborations.",
+        )
 
 
 if __name__ == "__main__":
