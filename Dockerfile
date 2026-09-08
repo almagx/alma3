@@ -4,6 +4,7 @@ FROM ${PYTHON_IMAGE} AS runtime
 WORKDIR /app
 
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends procps \
     && command -v ps >/dev/null \
     && rm -rf /var/lib/apt/lists/*
