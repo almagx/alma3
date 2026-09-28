@@ -280,7 +280,7 @@ def _array_csv_batches(
     if type(batch_size) is not int or batch_size <= 0:
         raise InputContractError("batch_size must be a positive integer")
     input_path = Path(path)
-    opener = gzip.open if input_path.name.endswith(".gz") else open
+    opener = gzip.open if input_path.name.lower().endswith(".gz") else open
     with opener(input_path, "rt", encoding="utf-8", newline="") as handle:
         initial_stat = os.fstat(handle.fileno())
         reader = csv.reader(handle)
@@ -402,43 +402,63 @@ def load_bed_methyl_with_manifest(
     coverage_by_cpg = torch.zeros(len(cpg.cpg_ids), dtype=torch.int64)
     seen_coords: set[tuple[str, int]] = set()
     modification_mode: str | None = None
-    opener = gzip.open if input_path.name.endswith(".gz") else open
+    opener = gzip.open if input_path.name.lower().endswith(".gz") else open
     with opener(input_path, "rt", encoding="utf-8") as handle:
         initial_stat = os.fstat(handle.fileno())
         reader = csv.reader(handle, delimiter="\t")
-        for row in reader:
+        for line_no, row in enumerate(reader, start=1):
             if len(row) < 11:
-                raise InputContractError("bedMethyl rows must have at least 11 columns")
+                raise InputContractError(
+                    f"bedMethyl line {line_no} has {len(row)} columns; at least 11 are required"
+                )
             row_mode = _BEDMETHYL_MODE_BY_CODE.get(row[3])
             if row_mode is None:
                 raise InputContractError(
-                    "bedMethyl column 4 must be m (5mC) or C (combined 5mC+5hmC)"
+                    f"bedMethyl line {line_no} column 4 must be m (5mC) or C (combined 5mC+5hmC): {row[3]!r}"
                 )
             if modification_mode is None:
                 modification_mode = row_mode
             elif row_mode != modification_mode:
-                raise InputContractError("bedMethyl contains mixed modification modes")
-            key = (row[0], int(row[1]))
+                raise InputContractError(f"bedMethyl line {line_no} contains mixed modification modes")
+            try:
+                start = int(row[1])
+            except ValueError:
+                raise InputContractError(
+                    f"bedMethyl line {line_no} has non-integer start: {row[1]!r}"
+                ) from None
+            key = (row[0], start)
             indices = coord_to_indices.get(key)
             if indices is None:
                 continue
             if key in seen_coords:
-                raise InputContractError(f"bedMethyl has duplicate release CpG coordinate: {key[0]}:{key[1]}")
+                raise InputContractError(
+                    f"bedMethyl line {line_no} has duplicate release CpG coordinate: {key[0]}:{key[1]}"
+                )
             seen_coords.add(key)
-            coverage = float(row[9])
+            try:
+                coverage = float(row[9])
+            except ValueError:
+                coverage = math.nan
             if (
                 not math.isfinite(coverage)
                 or coverage < 0
                 or not coverage.is_integer()
                 or coverage > torch.iinfo(torch.int64).max
             ):
-                raise InputContractError("bedMethyl coverage must be a finite non-negative integer")
+                raise InputContractError(
+                    f"bedMethyl line {line_no} coverage must be a finite non-negative integer: {row[9]!r}"
+                )
             coverage_count = int(coverage)
             if coverage_count == 0:
                 continue
-            fraction = float(row[10])
+            try:
+                fraction = float(row[10])
+            except ValueError:
+                fraction = math.nan
             if not math.isfinite(fraction) or fraction < 0 or fraction > 100:
-                raise InputContractError("bedMethyl fraction_modified must be in [0, 100]")
+                raise InputContractError(
+                    f"bedMethyl line {line_no} fraction_modified must be in [0, 100]: {row[10]!r}"
+                )
             values[indices] = fraction / 100.0
             observed[indices] = True
             coverage_by_cpg[indices] = coverage_count
@@ -454,16 +474,20 @@ def load_bed_methyl_with_manifest(
         raise InputContractError("bedMethyl input did not match any release CpGs")
     if modification_mode is None:
         raise InputContractError("bedMethyl input contains no rows")
-    sid = (
-        input_path.name.replace(".bed.gz", "").replace(".bed", "")
-        if sample_id is None
-        else sample_id
-    )
+    sid = _bedmethyl_sample_id(input_path) if sample_id is None else sample_id
     try:
         validate_sample_id(sid)
     except ValueError as error:
         raise InputContractError(f"bedMethyl {error}") from error
     return [sid], values[None, :], observed[None, :], coverage_by_cpg[None, :], modification_mode
+
+
+def _bedmethyl_sample_id(path: Path) -> str:
+    name = path.name
+    for suffix in (".bed.gz", ".bed"):
+        if name.lower().endswith(suffix):
+            return name[: -len(suffix)]
+    return name
 
 
 def _input_paths(value: str | Path | Sequence[str | Path]) -> list[Path]:

@@ -279,6 +279,53 @@ class RuntimeContractTests(unittest.TestCase):
             with self.assertRaisesRegex(InputContractError, "mixed modification modes"):
                 load_bed_methyl_with_manifest(mixed, manifest)
 
+    def test_bedmethyl_sample_id_and_compression_follow_case_insensitive_suffixes(self) -> None:
+        manifest = CpGManifest(
+            cpg_ids=("target",),
+            chr_id=torch.tensor([0]),
+            pos=torch.tensor([0.1]),
+            chrom=("chr1",),
+            start=(100,),
+        )
+        row = b"chr1\t100\t101\tC\t0\t.\t100\t101\t0\t10\t50\n"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            for name, expected in (
+                ("sample.bed", "sample"),
+                ("sample.BED", "sample"),
+                ("my.bedgraph.bed", "my.bedgraph"),
+                ("sample.bed.gz", "sample"),
+                ("sample.Bed.GZ", "sample"),
+            ):
+                with self.subTest(name=name):
+                    bed = root / name
+                    bed.write_bytes(gzip.compress(row) if name.lower().endswith(".gz") else row)
+                    sample_ids, beta, *_ = load_bed_methyl_with_manifest(bed, manifest)
+                    self.assertEqual(sample_ids, [expected])
+                    self.assertEqual(beta.tolist(), [[0.5]])
+
+    def test_bedmethyl_row_errors_report_line_numbers(self) -> None:
+        manifest = CpGManifest(
+            cpg_ids=("target",),
+            chr_id=torch.tensor([0]),
+            pos=torch.tensor([0.1]),
+            chrom=("chr1",),
+            start=(100,),
+        )
+        valid = "chr1\t99\t100\tC\t0\t.\t99\t100\t0\t10\t50\n"
+        with tempfile.TemporaryDirectory() as raw:
+            bed = Path(raw) / "sample.bed"
+            for second_line, expected in (
+                ("chr1\t100\t101\tC\n", "line 2 has 4 columns; at least 11 are required"),
+                ("chrom\tstart\tend\tC\t0\t.\t0\t0\t0\t10\t50\n", "line 2 has non-integer start: 'start'"),
+                ("chr1\t100\t101\tC\t0\t.\t100\t101\t0\tten\t50\n", "line 2 coverage must be .*: 'ten'"),
+                ("chr1\t100\t101\tC\t0\t.\t100\t101\t0\t10\thalf\n", r"line 2 fraction_modified must be .*: 'half'"),
+            ):
+                with self.subTest(expected=expected):
+                    bed.write_text(valid + second_line, encoding="utf-8")
+                    with self.assertRaisesRegex(InputContractError, f"^bedMethyl {expected}"):
+                        load_bed_methyl_with_manifest(bed, manifest)
+
     def test_python_bedmethyl_api_detects_each_input_mode(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
