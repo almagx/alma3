@@ -141,8 +141,6 @@ class RepositoryBoundaryTests(unittest.TestCase):
         ):
             with self.subTest(section=section):
                 self.assertIn(f"<summary><strong>{section}</strong></summary>", readme)
-        self.assertIn("### Key features", readme)
-        self.assertNotIn("<summary><strong>Key features</strong></summary>", readme)
         inputs = readme.index("<summary><strong>Inputs</strong></summary>")
         ont = readme.index("<summary><strong>Oxford Nanopore</strong></summary>")
         pacbio = readme.index("<summary><strong>PacBio HiFi</strong></summary>")

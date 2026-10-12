@@ -12,17 +12,9 @@
 
 ## Model introduction
 
-ALMA3 3.1.0 combines nine neural classifiers and one CpG-template classifier. It selects a disease type, then its subtype, using the frozen ensemble probabilities. The selected subtype is issued at a joint probability of at least 0.3295999742967636; positive cases below this cutoff are reported as subtype unresolved.
-
-### Key features
-
-- **Frozen ten-member ensemble:** 387,849 ordered CpG features and 109 terminal outcomes.
-- **Diagnostic hierarchy:** tumor presence, 5 lineages, 15 families, 35 types and 107 subtypes.
-- **CPU inference:** padded 64-row computation and 1,090 same-pass probability features for the selected tumor map.
+ALMA3 classifies hematolymphoid tumors using DNA methylation. It works with methylation data from microarrays, Oxford Nanopore and PacBio HiFi sequencing.
 
 ## Quick start
-
-ALMA3 3.1.0 replaces 3.0.0 and is the supported release. Update existing image pins to `3.1.0`; use the digest in the [release notes](https://github.com/almagx/alma3/releases/tag/v3.1.0) to pin the exact image.
 
 ```bash
 export ALMA3_IMAGE=ghcr.io/almagx/alma3:3.1.0
@@ -45,7 +37,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   infer -i sample.bed -o sample.alma3.csv
 ```
 
-The image includes the model and runs on an x86-64 CPU with at least 16 GB RAM. Use eight CPU threads for the qualified execution policy.
+The image includes the model and runs on an x86-64 CPU with at least 16 GB RAM.
 
 ## Point-and-click automatic analysis
 
@@ -94,7 +86,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   infer -i sample.bed -o sample.alma3.csv
 ```
 
-The exporter verifies GRCh38 and writes the 387,847 distinct projectable genomic positions (one shared probe position and one non-CpG probe excluded from the target) plus a receipt. This Modkit command produces combined 5mC+5hmC input, which ALMA3 detects automatically. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
+This Modkit command produces combined 5mC+5hmC input, which ALMA3 detects automatically. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
 </details>
 
@@ -141,15 +133,11 @@ For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not us
 
 <details><summary><strong>Results</strong></summary>
 
-CSV has 29 columns for inspection and sharing; JSONL provides the structured result for software integrations. Results follow the ordered diagnostic path, and only the subtype can be withheld by the reporting cutoff. Release assets retain integrity checks. Inputs below 5,000 observed CpGs are rejected before results are written.
-
-CSV and JSON summaries display percentages without the word "confidence". The subtype decision score has an issuance threshold at **85%**. The piecewise-linear scale maps raw probability 0 to 0, the frozen cutoff 0.3295999742967636 to 85, and 1 to 100. Issuance uses the original unrounded probability; the 109 terminal probabilities retain the raw probabilities. Differential entries contain classification and index only. Subtype scaled-score fields use the 0–100 display scale, with the cutoff at 85. The scale is not a probability of correctness.
-
 | Result | Meaning |
 |---|---|
-| `fully_resolved` | The applicable hierarchy was fully resolved. |
+| `fully_resolved` | The tumor classification is complete. |
 | `heme_tumor_not_detected` | No hematolymphoid tumor signal was detected. |
-| `partially_resolved` | The disease type was resolved; the selected subtype was below its reporting cutoff. |
+| `partially_resolved` | The tumor type was identified; the subtype remains unresolved. |
 
 </details>
 
