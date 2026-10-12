@@ -1,30 +1,30 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from alma3.dx import DxContractError
+from alma3.hashes import sha256_file
 from alma3.release import (
+    RELEASE_FILES,
     ensemble_asset_paths,
     load_release,
     revalidate_release_identity,
     validate_release,
-    RELEASE_FILES,
 )
-from alma3.hashes import sha256_file
 
 
 class NestedPayloadTests(unittest.TestCase):
     def manifest(self):
-        return dict(
-            kind="alma3_final_ten_v1",
-            decision_rule="type_first_v1",
-            members=[dict(kind="neural", export=f"members/{i}") for i in range(10)],
-        )
+        return {
+            "kind": "alma3_final_ten_v1",
+            "decision_rule": "type_first_v1",
+            "members": [{"kind": "neural", "export": f"members/{i}"} for i in range(10)],
+        }
 
     def test_nested_assets_and_path_escape(self):
         manifest = self.manifest()

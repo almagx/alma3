@@ -1,24 +1,26 @@
 """Release-critical decoder, reporting and input-boundary tests."""
 
 import copy
-import unittest
+import itertools
 import json
+import unittest
+
 import jsonschema
-from alma3.infer import _result_csv_row
-from alma3.clinical_result import result_schema_path, scaled_subtype_score
 import torch
-from alma3.clinical_result import results_from_probabilities, validate_result
+
+from alma3.clinical_result import result_schema_path, results_from_probabilities, scaled_subtype_score, validate_result
 from alma3.dx import DX_TARGETS, Taxonomy
 from alma3.final_ensemble import FinalEnsemble
+from alma3.infer import _result_csv_row
 from alma3.terminal import SUBTYPE_CUTOFF, selected_path_scores
 
 
 def taxonomy():
     # 107 subtype leaves plus one broad terminal, with both singleton and competing branches.
     return Taxonomy.from_dict(
-        dict(
-            kind="alma3_taxonomy",
-            levels=dict(
+        {
+            "kind": "alma3_taxonomy",
+            "levels": dict(
                 zip(
                     DX_TARGETS,
                     [
@@ -30,10 +32,10 @@ def taxonomy():
                     ],
                 )
             ),
-            family_by_lineage={"a": ["fa"], "b": ["fb"]},
-            type_by_family={"fa": ["ta"], "fb": ["tb", "broad"]},
-            subtype_by_type={"ta": ["s0"], "tb": [f"s{i}" for i in range(1, 107)], "broad": []},
-        )
+            "family_by_lineage": {"a": ["fa"], "b": ["fb"]},
+            "type_by_family": {"fa": ["ta"], "fb": ["tb", "broad"]},
+            "subtype_by_type": {"ta": ["s0"], "tb": [f"s{i}" for i in range(1, 107)], "broad": []},
+        }
     )
 
 
@@ -54,7 +56,7 @@ class ReportingTests(unittest.TestCase):
                 )
             },
         )
-        self.runtime = dict(package_version="3.1.0", contract_sha256="b" * 64, device="cpu")
+        self.runtime = {"package_version": "3.1.0", "contract_sha256": "b" * 64, "device": "cpu"}
         self.cuts = {"thresholds": dict(zip(DX_TARGETS, [0.0, 0.0, 0.0, 0.0, SUBTYPE_CUTOFF]))}
 
     def result(self, p, cuts=None):
@@ -65,7 +67,7 @@ class ReportingTests(unittest.TestCase):
             self.tax,
             self.release,
             runtime=self.runtime,
-            input_metadata=[dict(format="array", value_mode="beta", clipped_value_count=0)],
+            input_metadata=[{"format": "array", "value_mode": "beta", "clipped_value_count": 0}],
             observed_cpg_counts=[5000],
             minimum_observed_cpgs=5000,
         )[0]
@@ -75,7 +77,7 @@ class ReportingTests(unittest.TestCase):
         p[0] = 0.2
         p[1] = 0.3
         p[2:4] = 0.25
-        selected, path, _, _ = selected_path_scores(p[None], self.tax)
+        selected, _path, _, _ = selected_path_scores(p[None], self.tax)
         self.assertEqual(int(selected), 2)
         r = self.result(p)
         self.assertEqual(r["prediction"]["terminal_index"], 2)
@@ -109,7 +111,7 @@ class ReportingTests(unittest.TestCase):
         self.assertAlmostEqual(scaled_subtype_score(.1), 25.788837)
         self.assertAlmostEqual(scaled_subtype_score(.489), 88.56652788466175, places=12)
         scores = [scaled_subtype_score(i / 1000) for i in range(1001)]
-        self.assertTrue(all(a < b for a, b in zip(scores, scores[1:])))
+        self.assertTrue(all(a < b for a, b in itertools.pairwise(scores)))
         for invalid in (True, None, "0.5", -.1, 1.1, float("nan"), float("inf")):
             with self.assertRaises(ValueError):
                 scaled_subtype_score(invalid)

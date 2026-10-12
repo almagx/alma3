@@ -23,7 +23,6 @@ from alma3 import ALMA3
 from alma3.cli import main as cli_main
 from alma3.clinical_result import _result_summary, validate_result
 from alma3.data import CpGManifest
-from tests.helpers import FixtureEnsemble as DiagnosticModel
 from alma3.hashes import publish_new_file as publish_new_file_actual
 from alma3.hashes import runtime_contract_sha256
 from alma3.infer import (
@@ -48,6 +47,7 @@ from alma3.runtime import (
     _require_supported_cpu_build,
     _require_supported_cuda_memory,
 )
+from tests.helpers import FixtureEnsemble as DiagnosticModel
 from tests.helpers import (
     create_release,
     validated_release_fixture,

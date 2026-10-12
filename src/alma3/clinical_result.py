@@ -236,9 +236,11 @@ def results_from_probabilities(
         _validate_input(metadata, count)
         path, decision = [], None
         terminal = int(selected[i])
-        prediction = dict(decision_rule='type_first_v1', terminal_index=terminal,
-                          path=chosen[i].tolist(), probabilities=probabilities[i].tolist(),
-                          subtype_cutoff_passed=bool(chosen[i, 4] >= 0 and probabilities[i, terminal] >= SUBTYPE_CUTOFF))
+        prediction = {
+            "decision_rule": 'type_first_v1', "terminal_index": terminal,
+            "path": chosen[i].tolist(), "probabilities": probabilities[i].tolist(),
+            "subtype_cutoff_passed": bool(chosen[i, 4] >= 0 and probabilities[i, terminal] >= SUBTYPE_CUTOFF),
+        }
         for j, level in enumerate(RESULT_LEVELS):
             index = int(chosen[i, j])
             if index < 0:

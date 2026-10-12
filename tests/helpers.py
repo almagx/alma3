@@ -3,7 +3,9 @@
 import hashlib
 import json
 from pathlib import Path
+
 import torch
+
 from alma3.data import CpGManifest
 from alma3.dx import DX_TARGETS, load_taxonomy
 from alma3.hashes import sha256_file
@@ -63,25 +65,25 @@ def create_release(root):
 
     write_json(
         root / "thresholds.json",
-        dict(minimum_observed_cpgs=5000, thresholds={k: SUBTYPE_CUTOFF if k == "subtype" else 0.0 for k in DX_TARGETS}),
+        {"minimum_observed_cpgs": 5000, "thresholds": {k: SUBTYPE_CUTOFF if k == "subtype" else 0.0 for k in DX_TARGETS}},
     )
-    write_json(root / "release.json", dict(version="3.1.0"))
+    write_json(root / "release.json", {"version": "3.1.0"})
     write_json(root / "SHA256SUMS.json", {p.name: sha256(p) for p in root.iterdir()})
     (root / "RELEASE_COMPLETE").write_text("complete\n")
     return root, FixtureEnsemble()
 
 
 def validated_release_fixture(root, model):
-    return dict(
-        root=root,
-        hashes=json.loads((root / "SHA256SUMS.json").read_text()),
-        manifest_sha256=sha256(root / "SHA256SUMS.json"),
-        taxonomy=load_taxonomy(root / "taxonomy.json"),
-        cpg=CpGManifest.load(root / "cpg_manifest.json"),
-        thresholds=json.loads((root / "thresholds.json").read_text()),
-        release=json.loads((root / "release.json").read_text()),
-        model=model,
-    )
+    return {
+        "root": root,
+        "hashes": json.loads((root / "SHA256SUMS.json").read_text()),
+        "manifest_sha256": sha256(root / "SHA256SUMS.json"),
+        "taxonomy": load_taxonomy(root / "taxonomy.json"),
+        "cpg": CpGManifest.load(root / "cpg_manifest.json"),
+        "thresholds": json.loads((root / "thresholds.json").read_text()),
+        "release": json.loads((root / "release.json").read_text()),
+        "model": model,
+    }
 
 
 def write_array_csv(

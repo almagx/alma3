@@ -2,6 +2,7 @@
 
 import torch
 from torch import nn
+
 from .direct_encoders import high_precision
 
 

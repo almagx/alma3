@@ -17,7 +17,7 @@ from alma3.terminal import terminal_log_probabilities, terminal_paths
 from .terminal import terminal_indices
 
 MINIMUM_OBSERVED_CPGS = 5000
-PROBABILITY_REPRESENTATION = dict(name="final_ten_member_probabilities", version=1, dtype="float32", dimensions=1090)
+PROBABILITY_REPRESENTATION = {"name": "final_ten_member_probabilities", "version": 1, "dtype": "float32", "dimensions": 1090}
 
 
 class DiagnosisResidual(nn.Module):

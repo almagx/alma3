@@ -239,8 +239,8 @@ class DiagnosticModel(nn.Module):
         if foundation is not None:
             raise DxContractError('3.1.0 requires direct CpG inputs')
         self.foundation, self.config = None, config
-        from .direct_encoders import QualityTrunk, DirectDiagnosisEvidence
-        from .terminal import TerminalHead, ConditionalHeads, TypeSubtypeHead, CosineProjection
+        from .direct_encoders import DirectDiagnosisEvidence, QualityTrunk
+        from .terminal import ConditionalHeads, CosineProjection, TerminalHead, TypeSubtypeHead
         taxonomy = Taxonomy.from_dict(config.terminal_taxonomy)
         self.trunk = QualityTrunk(nn.LayerNorm(256), nn.Linear(260, 384), nn.GELU(),
                                  nn.Dropout(config.dropout), nn.Linear(384, 1024), nn.GELU())

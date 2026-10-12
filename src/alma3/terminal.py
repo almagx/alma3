@@ -1,10 +1,13 @@
 """Ordered terminal distributions for the selected 3.1.0 classifiers."""
 
 from __future__ import annotations
+
 import hashlib
 import json
+
 import torch
 from torch import nn
+
 from .dx import DX_TARGETS, DxContractError
 
 MODE = "joint_terminal_v1"

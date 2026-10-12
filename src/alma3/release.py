@@ -77,16 +77,16 @@ def ensemble_asset_paths(manifest):
 
 
 def validate_reporting_policy(value, *, ensemble_sha256, taxonomy_sha256):
-    expected = dict(
-        kind="alma3_ensemble_reporting",
-        schema_version=1,
-        minimum_observed_cpgs=5000,
-        decision_rule="type_first_v1",
-        policy="fixed_subtype_only_v1",
-        ensemble_sha256=ensemble_sha256,
-        taxonomy_sha256=taxonomy_sha256,
-        thresholds={key: SUBTYPE_CUTOFF if key == "subtype" else 0.0 for key in DX_TARGETS},
-    )
+    expected = {
+        "kind": "alma3_ensemble_reporting",
+        "schema_version": 1,
+        "minimum_observed_cpgs": 5000,
+        "decision_rule": "type_first_v1",
+        "policy": "fixed_subtype_only_v1",
+        "ensemble_sha256": ensemble_sha256,
+        "taxonomy_sha256": taxonomy_sha256,
+        "thresholds": {key: SUBTYPE_CUTOFF if key == "subtype" else 0.0 for key in DX_TARGETS},
+    }
     if value != expected:
         raise DxContractError("reporting requires the frozen subtype-only cutoff and ensemble binding")
     return value
@@ -138,7 +138,7 @@ def validate_release(artifact=None, *, verify_hashes=True, device="cpu", load_mo
         or not _is_revision(release.get("runtime_git_commit"))
         or release.get("ensemble_sha256") != hashes["ensemble.json"]
         or release.get("representation")
-        != dict(name="final_ten_member_probabilities", version=1, dtype="float32", dimensions=1090)
+        != {"name": "final_ten_member_probabilities", "version": 1, "dtype": "float32", "dimensions": 1090}
     ):
         raise DxContractError("unsupported release metadata")
     if not (root / "LICENSE").read_text().startswith(RELEASE_LICENSE_HEADER):
@@ -159,16 +159,16 @@ def validate_release(artifact=None, *, verify_hashes=True, device="cpu", load_mo
         ensemble_sha256=hashes["ensemble.json"],
         taxonomy_sha256=hashes["taxonomy.json"],
     )
-    result = dict(
-        root=root,
-        release=release,
-        hashes=hashes,
-        manifest_sha256=sha256_file(root / "SHA256SUMS.json"),
-        cpg=cpg,
-        taxonomy=taxonomy,
-        thresholds=thresholds,
-        ensemble=manifest,
-    )
+    result = {
+        "root": root,
+        "release": release,
+        "hashes": hashes,
+        "manifest_sha256": sha256_file(root / "SHA256SUMS.json"),
+        "cpg": cpg,
+        "taxonomy": taxonomy,
+        "thresholds": thresholds,
+        "ensemble": manifest,
+    }
     if load_model:
         from .final_ensemble import FinalEnsemble
 

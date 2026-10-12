@@ -15,8 +15,11 @@ from typing import Any
 import torch
 
 from .clinical_result import (
-    SUBTYPE_SCALED_CUTOFF, scaled_subtype_score,
-    serialize_result, validate_result, validate_sample_id,
+    SUBTYPE_SCALED_CUTOFF,
+    scaled_subtype_score,
+    serialize_result,
+    validate_result,
+    validate_sample_id,
 )
 from .data import CpGManifest
 from .dx import (

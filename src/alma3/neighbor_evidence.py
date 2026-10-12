@@ -1,6 +1,7 @@
 """Frozen observed-neighbor CpG interactions."""
 
 import hashlib
+
 import numpy as np
 import torch
 from torch import nn

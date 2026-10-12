@@ -160,8 +160,8 @@ class DxConfig:
         return config
 
     def validate(self) -> None:
-        from .terminal import terminal_paths
         from .dx import Taxonomy
+        from .terminal import terminal_paths
         if (self.foundation is not None or self.hidden_dim != 384 or self.n_cpgs != 387849
                 or self.direct_cpg_branch not in ('quality256_v1', 'quality256_linear_v1', 'quality256_neighbor_v1')
                 or self.output_mode not in ('joint_terminal_v1', 'conditional_heads_v1', 'type_subtype_v1')
