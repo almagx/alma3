@@ -139,7 +139,9 @@ For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not us
 
 <details><summary><strong>Results</strong></summary>
 
-CSV is easiest to read and share; JSONL provides the same result in a structured format for software integrations.
+CSV has 29 columns for inspection and sharing; JSONL provides the structured result for software integrations. Accepted and unresolved levels are derived from the ordered diagnostic path. Release assets retain integrity checks, and inference requires at least 5,000 observed CpGs.
+
+CSV and JSON summaries display percentages without the word "confidence". The subtype decision score has an issuance threshold at **85%**. The piecewise-linear scale maps raw probability 0 to 0, the frozen cutoff 0.3295999742967636 to 85, and 1 to 100. Issuance uses the original unrounded probability; the 109 terminal probabilities retain the raw probabilities. Differential entries contain classification and index only. Subtype scaled-score fields use the 0–100 display scale, with the cutoff at 85. The scale is not a probability of correctness.
 
 | Result | Meaning |
 |---|---|

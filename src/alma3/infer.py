@@ -14,7 +14,10 @@ from typing import Any
 
 import torch
 
-from .clinical_result import serialize_result, validate_result, validate_sample_id
+from .clinical_result import (
+    SUBTYPE_SCALED_CUTOFF, scaled_subtype_score,
+    serialize_result, validate_result, validate_sample_id,
+)
 from .data import CpGManifest
 from .dx import (
     DX_REPRESENTATION_DIMENSIONS,
@@ -49,17 +52,10 @@ _RESULT_CSV_FIELDS = (
     "sample_id",
     "result_summary",
     "result_status",
-    "resolved_level",
     "resolved_classification",
-    "resolved_basis",
-    "unresolved_level",
-    "unresolved_reporting_cutoff",
     "differential_1_classification",
-    "differential_1_model_score",
     "differential_2_classification",
-    "differential_2_model_score",
     "observed_cpg_count",
-    "minimum_observed_cpgs",
     "input_format",
     "input_value_mode",
     "input_modification_mode",
@@ -67,29 +63,20 @@ _RESULT_CSV_FIELDS = (
     "tumor_presence",
     "tumor_presence_status",
     "tumor_presence_model_score",
-    "tumor_presence_reporting_cutoff",
     "lineage",
     "lineage_status",
     "lineage_model_score",
-    "lineage_reporting_cutoff",
     "family",
     "family_status",
     "family_model_score",
-    "family_reporting_cutoff",
     "type",
     "type_status",
     "type_model_score",
-    "type_reporting_cutoff",
     "subtype",
     "subtype_status",
-    "subtype_model_score",
-    "subtype_reporting_cutoff",
-    "result_kind",
-    "result_schema_version",
+    "subtype_scaled_score",
+    "subtype_scaled_cutoff",
     "release_version",
-    "release_manifest_sha256",
-    "runtime_package_version",
-    "runtime_contract_sha256",
     "inference_device",
 )
 
@@ -203,47 +190,24 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
     accepted = result["accepted"] or {}
     decision = result["decision"] or {}
     nodes = {node["level"]: node for node in result["path"]}
-    accepted_node = result["path"][-1] if result["path"] else {}
     differential = decision.get("differential", [])
     row: dict[str, Any] = {
         "sample_id": result["sample_id"],
         "result_summary": result["result_summary"],
         "result_status": result["status"],
-        "result_kind": result["kind"],
-        "result_schema_version": result["schema_version"],
         "release_version": result["release"]["version"],
-        "release_manifest_sha256": result["release"]["manifest_sha256"],
-        "runtime_package_version": result["runtime"]["package_version"],
-        "runtime_contract_sha256": result["runtime"]["contract_sha256"],
         "inference_device": result["runtime"]["device"],
         "input_format": result["input"]["format"],
         "input_value_mode": result["input"]["value_mode"],
         "input_modification_mode": result["input"].get("modification_mode", ""),
         "input_clipped_value_count": result["input"]["clipped_value_count"],
         "observed_cpg_count": result["observed_cpg_count"],
-        "minimum_observed_cpgs": result["minimum_observed_cpgs"],
-        "resolved_level": accepted.get("level", ""),
         "resolved_classification": accepted.get("classification", ""),
-        "resolved_basis": (
-            "implied_by_hierarchy"
-            if accepted_node.get("status") == "implied"
-            else "scored"
-            if accepted_node
-            else ""
-        ),
-        "unresolved_level": decision.get("level", ""),
-        "unresolved_reporting_cutoff": decision.get("reporting_cutoff", ""),
         "differential_1_classification": (
             differential[0]["classification"] if differential else ""
         ),
-        "differential_1_model_score": (
-            differential[0]["model_score"] if differential else ""
-        ),
         "differential_2_classification": (
             differential[1]["classification"] if len(differential) > 1 else ""
-        ),
-        "differential_2_model_score": (
-            differential[1]["model_score"] if len(differential) > 1 else ""
         ),
     }
     for level, prefix in (
@@ -257,9 +221,14 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
         row[prefix] = node.get("classification", "")
         row[f"{prefix}_status"] = node.get("status", "")
         score = node.get("model_score")
-        cutoff = node.get("reporting_cutoff")
-        row[f"{prefix}_model_score"] = "" if score is None else score
-        row[f"{prefix}_reporting_cutoff"] = "" if cutoff is None else cutoff
+        if level != "subtype":
+            row[f"{prefix}_model_score"] = "" if score is None else score
+    subtype_score = (
+        result["prediction"]["probabilities"][result["prediction"]["terminal_index"]]
+        if result["prediction"]["path"][4] >= 0 else None
+    )
+    row["subtype_scaled_score"] = "" if subtype_score is None else scaled_subtype_score(subtype_score)
+    row["subtype_scaled_cutoff"] = "" if subtype_score is None else SUBTYPE_SCALED_CUTOFF
     if set(row) != set(_RESULT_CSV_FIELDS):
         raise InputContractError("CSV result projection fields are invalid")
     return row

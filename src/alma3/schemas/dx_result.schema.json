@@ -5,15 +5,12 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "kind",
-    "schema_version",
     "sample_id",
     "result_summary",
     "release",
     "runtime",
     "input",
     "observed_cpg_count",
-    "minimum_observed_cpgs",
     "status",
     "accepted",
     "path",
@@ -21,12 +18,6 @@
     "prediction"
   ],
   "properties": {
-    "kind": {
-      "const": "alma3_dx_result"
-    },
-    "schema_version": {
-      "const": 3
-    },
     "sample_id": {
       "type": "string",
       "minLength": 1,
@@ -49,9 +40,6 @@
     "observed_cpg_count": {
       "type": "integer",
       "minimum": 5000
-    },
-    "minimum_observed_cpgs": {
-      "const": 5000
     },
     "status": {
       "enum": [
@@ -154,7 +142,6 @@
       "additionalProperties": false,
       "required": [
         "version",
-        "manifest_sha256",
         "ensemble_sha256",
         "taxonomy_sha256",
         "cpg_manifest_sha256",
@@ -163,9 +150,6 @@
       "properties": {
         "version": {
           "const": "3.1.0"
-        },
-        "manifest_sha256": {
-          "$ref": "#/$defs/sha256"
         },
         "ensemble_sha256": {
           "$ref": "#/$defs/sha256"
@@ -185,17 +169,9 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "package_version",
-        "contract_sha256",
         "device"
       ],
       "properties": {
-        "package_version": {
-          "const": "3.1.0"
-        },
-        "contract_sha256": {
-          "$ref": "#/$defs/sha256"
-        },
         "device": {
           "type": "string",
           "pattern": "^(cpu|cuda:(0|[1-9][0-9]*))$"
@@ -298,14 +274,10 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "level",
         "index",
         "classification"
       ],
       "properties": {
-        "level": {
-          "$ref": "#/$defs/level"
-        },
         "index": {
           "type": "integer",
           "minimum": 0
@@ -323,9 +295,7 @@
         "level",
         "status",
         "index",
-        "classification",
-        "model_score",
-        "reporting_cutoff"
+        "classification"
       ],
       "properties": {
         "level": {
@@ -354,39 +324,44 @@
               "$ref": "#/$defs/probability"
             }
           ]
-        },
-        "reporting_cutoff": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "$ref": "#/$defs/probability"
-            }
-          ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "level": {
+                "const": "subtype"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "model_score"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "model_score"
+            ]
+          }
+        }
+      ]
     },
     "unresolvedDecision": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "level",
         "status",
-        "reporting_cutoff",
         "differential",
         "selected_index",
         "selected_score"
       ],
       "properties": {
-        "level": {
-          "$ref": "#/$defs/level"
-        },
         "status": {
           "const": "unresolved"
-        },
-        "reporting_cutoff": {
-          "$ref": "#/$defs/probability"
         },
         "differential": {
           "type": "array",
@@ -410,20 +385,17 @@
       "additionalProperties": false,
       "required": [
         "index",
-        "classification",
-        "model_score"
+        "classification"
       ],
       "properties": {
         "index": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 106
         },
         "classification": {
           "type": "string",
           "minLength": 1
-        },
-        "model_score": {
-          "$ref": "#/$defs/probability"
         }
       }
     }

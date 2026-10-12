@@ -23,7 +23,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO_GZIP_SHA256 = "6e8a5dfae9bb0c63e69c1e9a186b4bd01ea2550c5460134b453a457166e8060f"
-DEMO_MANIFEST_SHA256 = "070a455c92f036ea10335204e6d1b46f86b6a4bba2085e4a60c987c77f4e62ce"
+DEMO_MANIFEST_SHA256 = "aeef29129fb8d3cbf911ddadfa8485b5f6523f79da29dc175918d83abf5af551"
 CANDIDATE_KIND = "alma3_docker_release_candidate_acceptance"
 CANDIDATE_SCHEMA_VERSION = 1
 CANDIDATE_MARKER = "ACCEPTANCE_COMPLETE"
@@ -298,11 +298,11 @@ def inspect_demo_results(jsonl: Path, manifest_path: Path) -> None:
             "sample_id": row["sample_id"],
             "observed_cpg_count": row["observed_cpg_count"],
             "expected_status": row["status"],
-            "accepted_level": None if row["accepted"] is None else row["accepted"]["level"],
+            "accepted_level": None if row["accepted"] is None else row["path"][-1]["level"],
             "accepted_classification": (
                 None if row["accepted"] is None else row["accepted"]["classification"]
             ),
-            "unresolved_level": None if row["decision"] is None else row["decision"]["level"],
+            "unresolved_level": None if row["decision"] is None else ("presence", "lineage", "family", "type", "subtype")[len(row["path"])],
             "result_summary": row["result_summary"],
         }
         for row in rows

@@ -7,12 +7,12 @@ from typing import Any
 
 import torch
 
-from . import __version__
 from .dx import DX_TARGETS, PRESENT_LABEL, DxContractError, Taxonomy
 from .release import RELEASE_VERSION
+from .terminal import SUBTYPE_CUTOFF
 
-RESULT_KIND = "alma3_dx_result"
-RESULT_SCHEMA_VERSION = 3
+SUBTYPE_SCALED_CUTOFF = 85.0
+
 RESULT_STATUSES = (
     "no_call",
     "heme_tumor_not_detected",
@@ -30,14 +30,13 @@ TARGET_BY_LEVEL = {
 }
 LEVEL_BY_TARGET = {target: level for level, target in TARGET_BY_LEVEL.items()}
 _RELEASE_HASH_FIELDS = {
-    "manifest_sha256",
     "ensemble_sha256",
     "taxonomy_sha256",
     "cpg_manifest_sha256",
     "thresholds_sha256",
 }
 _RELEASE_FIELDS = {"version", *_RELEASE_HASH_FIELDS}
-_RUNTIME_FIELDS = {"package_version", "contract_sha256", "device"}
+_RUNTIME_FIELDS = {"device"}
 _INPUT_FIELDS = {"format", "value_mode", "clipped_value_count"}
 _LEVEL_DISPLAY = {
     "presence": "hematolymphoid tumor presence",
@@ -68,35 +67,51 @@ def validate_sample_id(value: Any) -> str:
     return value
 
 
+def scaled_subtype_score(probability: float) -> float:
+    """Display-only 0–100 scale; raw probability remains the issuance criterion."""
+    if (isinstance(probability, bool) or not isinstance(probability, (int, float))
+            or not math.isfinite(probability) or not 0 <= probability <= 1):
+        raise ValueError("subtype probability must be a finite number in [0, 1]")
+    if probability <= SUBTYPE_CUTOFF:
+        return SUBTYPE_SCALED_CUTOFF * (probability / SUBTYPE_CUTOFF)
+    return SUBTYPE_SCALED_CUTOFF + (100 - SUBTYPE_SCALED_CUTOFF) * (
+        (probability - SUBTYPE_CUTOFF) / (1 - SUBTYPE_CUTOFF)
+    )
+
+
 def _result_summary(result: dict[str, Any]) -> str:
     status = result["status"]
     leading_candidate = None
     if status in ("no_call", "partially_resolved"):
         decision = result["decision"]
         candidate = decision["differential"][0]
-        cutoff_text = f"threshold {float(decision['reporting_cutoff']) * 100.0:.1f}%"
         leading_candidate = (
             f"Leading candidate: {candidate['classification']} "
-            f"({float(candidate['model_score']) * 100.0:.1f}% confidence; "
-            f"{cutoff_text})."
+            f"({scaled_subtype_score(result['prediction']['probabilities'][candidate['index'] + 1]):.1f}%; "
+            f"threshold {SUBTYPE_SCALED_CUTOFF:.1f}%)."
         )
     if status == "no_call":
         return f"Hematolymphoid tumor presence unresolved. {leading_candidate}"
 
     accepted = result["accepted"]
+    accepted_level = result["path"][-1]["level"]
     scored_node = next(node for node in reversed(result["path"]) if node["status"] == "resolved")
-    scored_confidence = float(scored_node["model_score"]) * 100.0
+    score = (result["prediction"]["probabilities"][result["prediction"]["terminal_index"]]
+             if scored_node["level"] == "subtype" else float(scored_node["model_score"]))
+    scored_confidence = score * 100.0
     if status == "heme_tumor_not_detected":
-        return f"Hematolymphoid tumor not detected ({scored_confidence:.1f}% confidence)."
+        return f"Hematolymphoid tumor not detected ({scored_confidence:.1f}%)."
 
-    evidence = f"{scored_confidence:.1f}% confidence"
-    if accepted["level"] == "presence":
+    evidence = f"{scored_confidence:.1f}%"
+    if scored_node["level"] == "subtype":
+        evidence = f"{scaled_subtype_score(score):.1f}%"
+    if accepted_level == "presence":
         summary = f"Hematolymphoid tumor detected ({evidence})."
     else:
-        level = _LEVEL_DISPLAY[accepted["level"]].capitalize()
+        level = _LEVEL_DISPLAY[accepted_level].capitalize()
         summary = f"{level}: {accepted['classification']} ({evidence})."
     if status == "partially_resolved":
-        unresolved = _LEVEL_DISPLAY[result["decision"]["level"]].capitalize()
+        unresolved = _LEVEL_DISPLAY[RESULT_LEVELS[len(result["path"])]].capitalize()
         return f"{summary} {unresolved} unresolved. {leading_candidate}"
     return summary
 
@@ -134,7 +149,6 @@ def _path_node(
     status: str,
     index: int,
     score: float | None,
-    threshold: float | None,
     taxonomy: Taxonomy,
 ) -> dict[str, Any]:
     return {
@@ -142,14 +156,12 @@ def _path_node(
         "status": status,
         "index": index,
         "classification": taxonomy.classes[TARGET_BY_LEVEL[level]][index],
-        "model_score": score,
-        "reporting_cutoff": threshold,
+        **({"model_score": score} if level != "subtype" else {}),
     }
 
 
 def _unresolved_decision(
     level: str,
-    threshold: float,
     ranked: list[tuple[int, float]],
     taxonomy: Taxonomy,
 ) -> dict[str, Any]:
@@ -157,12 +169,10 @@ def _unresolved_decision(
         raise DxContractError(f"{level} unresolved decision requires one or two differential diagnoses")
     labels = taxonomy.classes[TARGET_BY_LEVEL[level]]
     return {
-        "level": level,
         "status": "unresolved",
-        "reporting_cutoff": threshold,
         "differential": [
-            {"index": index, "classification": labels[index], "model_score": score}
-            for index, score in ranked
+            {"index": index, "classification": labels[index]}
+            for index, _ in ranked
         ],
     }
 
@@ -173,7 +183,6 @@ def _result(
     runtime: dict[str, str],
     input_metadata: dict[str, Any],
     observed_cpg_count: int,
-    minimum_observed_cpgs: int,
     status: str,
     path: list[dict[str, Any]],
     decision: dict[str, Any] | None,
@@ -182,18 +191,15 @@ def _result(
     accepted = (
         None
         if not path
-        else {key: path[-1][key] for key in ("level", "index", "classification")}
+        else {key: path[-1][key] for key in ("index", "classification")}
     )
     result = {
-        "kind": RESULT_KIND,
-        "schema_version": RESULT_SCHEMA_VERSION,
         "sample_id": sample_id,
         "result_summary": "",
         "release": dict(release),
         "runtime": dict(runtime),
         "input": dict(input_metadata),
         "observed_cpg_count": observed_cpg_count,
-        "minimum_observed_cpgs": minimum_observed_cpgs,
         "status": status,
         "accepted": accepted,
         "path": path,
@@ -210,7 +216,9 @@ def results_from_probabilities(
     input_metadata, observed_cpg_counts, minimum_observed_cpgs,
 ):
     """Apply reporting gates to the frozen selected path without changing the decoder."""
-    from .terminal import selected_path_scores, SUBTYPE_CUTOFF
+    from .terminal import selected_path_scores
+    release = {key: value for key, value in release.items() if key in _RELEASE_FIELDS}
+    runtime = {"device": runtime["device"]}
     _validate_release(release)
     _validate_runtime(runtime)
     selected, chosen, scores, distributions = selected_path_scores(probabilities, taxonomy)
@@ -242,14 +250,14 @@ def results_from_probabilities(
             score = float(scores[i, j])
             if not implied and score < cuts[j]:
                 ranked = _rank_candidates(distributions[j][i], indices, limit=2)
-                decision = _unresolved_decision(level, cuts[j], ranked, taxonomy)
+                decision = _unresolved_decision(level, ranked, taxonomy)
                 decision.update(selected_index=index, selected_score=score)
                 break
             path.append(_path_node(level, 'implied' if implied else 'resolved', index,
-                                   None if implied else score, None if implied else cuts[j], taxonomy))
+                                   None if implied else score, taxonomy))
         status = ('no_call' if not path else 'partially_resolved') if decision else (
             'heme_tumor_not_detected' if terminal == 0 else 'fully_resolved')
-        results.append(_result(sample_id, release, runtime, metadata, count, minimum_observed_cpgs,
+        results.append(_result(sample_id, release, runtime, metadata, count,
                                status, path, decision, prediction))
     return results
 
@@ -267,10 +275,6 @@ def _validate_release(release: Any) -> None:
 def _validate_runtime(runtime: Any) -> None:
     if not isinstance(runtime, dict) or set(runtime) != _RUNTIME_FIELDS:
         raise DxContractError("result runtime fields are invalid")
-    if runtime["package_version"] != __version__:
-        raise DxContractError("result runtime package version is invalid")
-    if not _is_sha256(runtime["contract_sha256"]):
-        raise DxContractError("result runtime contract_sha256 must be a lowercase SHA-256")
     device = runtime["device"]
     if device == "cpu":
         return
@@ -327,10 +331,8 @@ def _validate_score(value: Any, description: str, *, nullable: bool = False) -> 
 
 
 def _validate_identity_node(node: Any, description: str) -> None:
-    if not isinstance(node, dict) or set(node) != {"level", "index", "classification"}:
+    if not isinstance(node, dict) or set(node) != {"index", "classification"}:
         raise DxContractError(f"{description} fields are invalid")
-    if node["level"] not in RESULT_LEVELS:
-        raise DxContractError(f"{description} level is invalid")
     if type(node["index"]) is not int or node["index"] < 0:
         raise DxContractError(f"{description} index is invalid")
     if not isinstance(node["classification"], str) or not node["classification"]:
@@ -338,26 +340,19 @@ def _validate_identity_node(node: Any, description: str) -> None:
 
 
 def _validate_differential_entry(entry: Any, description: str) -> None:
-    if not isinstance(entry, dict) or set(entry) != {"index", "classification", "model_score"}:
-        raise DxContractError(f"{description} fields are invalid")
-    if type(entry["index"]) is not int or entry["index"] < 0:
+    _validate_identity_node(entry, description)
+    if entry["index"] >= 107:
         raise DxContractError(f"{description} index is invalid")
-    if not isinstance(entry["classification"], str) or not entry["classification"]:
-        raise DxContractError(f"{description} classification is invalid")
-    _validate_score(entry["model_score"], f"{description} model score")
 
 
 def validate_result(result: Any) -> None:
     fields = {
-        "kind",
-        "schema_version",
         "sample_id",
         "result_summary",
         "release",
         "runtime",
         "input",
         "observed_cpg_count",
-        "minimum_observed_cpgs",
         "status",
         "accepted",
         "path",
@@ -366,8 +361,6 @@ def validate_result(result: Any) -> None:
     }
     if not isinstance(result, dict) or set(result) != fields:
         raise DxContractError("Dx result fields are invalid")
-    if result["kind"] != RESULT_KIND or result["schema_version"] != RESULT_SCHEMA_VERSION:
-        raise DxContractError("Dx result kind or schema version is invalid")
     try:
         validate_sample_id(result["sample_id"])
     except ValueError as error:
@@ -375,13 +368,7 @@ def validate_result(result: Any) -> None:
     _validate_release(result["release"])
     _validate_runtime(result["runtime"])
     observed_count = result["observed_cpg_count"]
-    minimum_observed = result["minimum_observed_cpgs"]
-    if (
-        type(observed_count) is not int
-        or type(minimum_observed) is not int
-        or minimum_observed != 5000
-        or observed_count < minimum_observed
-    ):
+    if type(observed_count) is not int or observed_count < 5000:
         raise DxContractError("Dx result observed-CpG support is invalid")
     _validate_input(result["input"], observed_count)
     if result["status"] not in RESULT_STATUSES:
@@ -396,9 +383,9 @@ def validate_result(result: Any) -> None:
             "status",
             "index",
             "classification",
-            "model_score",
-            "reporting_cutoff",
         }
+        if position != 4:
+            node_fields.add("model_score")
         if not isinstance(node, dict) or set(node) != node_fields:
             raise DxContractError("Dx result path node fields are invalid")
         if node["level"] != RESULT_LEVELS[position]:
@@ -412,13 +399,12 @@ def validate_result(result: Any) -> None:
         if not isinstance(node["classification"], str) or not node["classification"]:
             raise DxContractError("Dx result path node classification is invalid")
         if node["status"] == "implied":
-            if node["model_score"] is not None or node["reporting_cutoff"] is not None:
+            if position == 4 or node["model_score"] is not None:
                 raise DxContractError(
-                    "implied Dx result nodes must have null model score and reporting cutoff"
+                    "implied ancestor nodes must have null model score"
                 )
-        else:
+        elif position != 4:
             _validate_score(node["model_score"], "Dx result path model score")
-            _validate_score(node["reporting_cutoff"], "Dx result path reporting cutoff")
 
     accepted = result["accepted"]
     if accepted is None:
@@ -427,45 +413,9 @@ def validate_result(result: Any) -> None:
     else:
         _validate_identity_node(accepted, "Dx result accepted")
         if not path or accepted != {
-            key: path[-1][key] for key in ("level", "index", "classification")
+            key: path[-1][key] for key in ("index", "classification")
         }:
             raise DxContractError("Dx result accepted must equal the last path node")
-
-    decision = result["decision"]
-    if decision is not None:
-        if not isinstance(decision, dict) or set(decision) != {
-            "level",
-            "status",
-            "reporting_cutoff",
-            "differential",
-            "selected_index",
-            "selected_score",
-        }:
-            raise DxContractError("Dx result decision fields are invalid")
-        if decision["status"] != "unresolved":
-            raise DxContractError("Dx result decision status is invalid")
-        next_position = len(path)
-        if next_position >= len(RESULT_LEVELS) or decision["level"] != RESULT_LEVELS[next_position]:
-            raise DxContractError("Dx result decision must be the first unresolved level")
-        _validate_score(decision['reporting_cutoff'], 'reporting cutoff')
-        _validate_score(decision['selected_score'], 'selected path score')
-        differential = decision["differential"]
-        if not isinstance(differential, list) or not 1 <= len(differential) <= 2:
-            raise DxContractError("Dx result decision must contain one or two differential diagnoses")
-        for position, entry in enumerate(differential, start=1):
-            _validate_differential_entry(entry, f"Dx result differential entry {position}")
-        if len({entry["index"] for entry in differential}) != len(differential):
-            raise DxContractError("Dx result differential indices must be unique")
-        expected_order = sorted(
-            differential,
-            key=lambda entry: (-float(entry["model_score"]), entry["index"]),
-        )
-        if differential != expected_order:
-            raise DxContractError("Dx result differential is not ranked deterministically")
-        if float(decision["selected_score"]) >= float(decision["reporting_cutoff"]):
-            raise DxContractError(
-                "Dx result unresolved classification meets its reporting cutoff"
-            )
 
     prediction = result['prediction']
     if (not isinstance(prediction, dict) or set(prediction) != {'decision_rule', 'terminal_index', 'path', 'probabilities', 'subtype_cutoff_passed'}
@@ -480,15 +430,43 @@ def validate_result(result: Any) -> None:
         _validate_score(probability, 'terminal probability')
     if abs(sum(prediction['probabilities']) - 1.) > 3e-6:
         raise DxContractError('terminal probabilities must sum to one')
-    from .terminal import SUBTYPE_CUTOFF
+
+    decision = result["decision"]
+    if decision is not None:
+        if not isinstance(decision, dict) or set(decision) != {
+            "status",
+            "differential",
+            "selected_index",
+            "selected_score",
+        }:
+            raise DxContractError("Dx result decision fields are invalid")
+        if decision["status"] != "unresolved":
+            raise DxContractError("Dx result decision status is invalid")
+        next_position = len(path)
+        if next_position != 4:
+            raise DxContractError("only a subtype may be withheld")
+        _validate_score(decision['selected_score'], 'selected path score')
+        differential = decision["differential"]
+        if not isinstance(differential, list) or not 1 <= len(differential) <= 2:
+            raise DxContractError("Dx result decision must contain one or two differential diagnoses")
+        for position, entry in enumerate(differential, start=1):
+            _validate_differential_entry(entry, f"Dx result differential entry {position}")
+        if len({entry["index"] for entry in differential}) != len(differential):
+            raise DxContractError("Dx result differential indices must be unique")
+        expected_order = sorted(
+            differential,
+            key=lambda entry: (-result['prediction']['probabilities'][entry['index'] + 1], entry['index']),
+        )
+        if differential != expected_order:
+            raise DxContractError("Dx result differential is not ranked deterministically")
+        if float(decision["selected_score"]) >= SUBTYPE_CUTOFF:
+            raise DxContractError(
+                "Dx result unresolved classification meets its reporting cutoff"
+            )
+
     eligible = prediction['path'][4] >= 0 and prediction['probabilities'][prediction['terminal_index']] >= SUBTYPE_CUTOFF
     if prediction['subtype_cutoff_passed'] != eligible:
         raise DxContractError('subtype cutoff eligibility differs from the selected terminal probability')
-    if any(node['reporting_cutoff'] != (SUBTYPE_CUTOFF if node['level'] == 'subtype' else 0.)
-           for node in path if node['status'] == 'resolved'):
-        raise DxContractError('reporting uses only the frozen subtype cutoff')
-    if decision and (decision['level'] != 'subtype' or decision['reporting_cutoff'] != SUBTYPE_CUTOFF):
-        raise DxContractError('only a subtype may be withheld')
     if any(node['index'] != prediction['path'][i] for i, node in enumerate(path)):
         raise DxContractError('reporting must preserve the selected diagnostic path')
     if decision and (decision['selected_index'] != prediction['path'][len(path)]):
@@ -497,7 +475,7 @@ def validate_result(result: Any) -> None:
     if (decision is not None) is not expected_decision:
         raise DxContractError("Dx result status and decision are inconsistent")
     if result["status"] == "no_call" and (
-        accepted is not None or path or decision["level"] != "presence"
+        accepted is not None or path
     ):
         raise DxContractError("no_call must stop at tumor presence")
     if result["status"] == "no_call" and {

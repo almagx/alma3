@@ -27,7 +27,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (99.1% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (99.1%)."
     },
     {
       "sample_id": "demo_03",
@@ -36,7 +36,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (53.9% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (53.9%)."
     },
     {
       "sample_id": "demo_04",
@@ -45,7 +45,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (61.4% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (61.4%)."
     },
     {
       "sample_id": "demo_05",
@@ -54,7 +54,7 @@
       "accepted_level": "subtype",
       "accepted_classification": "AML with ETV6 fusion",
       "unresolved_level": null,
-      "result_summary": "Subtype: AML with ETV6 fusion (34.0% confidence)."
+      "result_summary": "Subtype: AML with ETV6 fusion (85.2%)."
     },
     {
       "sample_id": "demo_06",
@@ -63,7 +63,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (77.6% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (77.6%)."
     },
     {
       "sample_id": "demo_08",
@@ -72,7 +72,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (98.2% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (98.2%)."
     },
     {
       "sample_id": "demo_09",
@@ -81,7 +81,7 @@
       "accepted_level": "subtype",
       "accepted_classification": "Blastic plasmacytoid dendritic cell neoplasm",
       "unresolved_level": null,
-      "result_summary": "Subtype: Blastic plasmacytoid dendritic cell neoplasm (93.2% confidence)."
+      "result_summary": "Subtype: Blastic plasmacytoid dendritic cell neoplasm (98.5%)."
     },
     {
       "sample_id": "demo_10",
@@ -90,7 +90,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (54.3% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (54.3%)."
     },
     {
       "sample_id": "demo_11",
@@ -99,7 +99,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (86.8% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (86.8%)."
     },
     {
       "sample_id": "demo_12",
@@ -108,7 +108,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (92.4% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (92.4%)."
     },
     {
       "sample_id": "demo_14",
@@ -117,7 +117,7 @@
       "accepted_level": "subtype",
       "accepted_classification": "Primary LBCL of immune-privileged sites",
       "unresolved_level": null,
-      "result_summary": "Subtype: Primary LBCL of immune-privileged sites (73.7% confidence)."
+      "result_summary": "Subtype: Primary LBCL of immune-privileged sites (94.1%)."
     },
     {
       "sample_id": "demo_15",
@@ -126,7 +126,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (95.2% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (95.2%)."
     },
     {
       "sample_id": "demo_16",
@@ -135,7 +135,7 @@
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (69.5% confidence)."
+      "result_summary": "Hematolymphoid tumor not detected (69.5%)."
     }
   ],
   "schema_version": 2

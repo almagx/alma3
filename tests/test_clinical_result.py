@@ -3,10 +3,9 @@
 import copy
 import unittest
 import json
-from pathlib import Path
 import jsonschema
 from alma3.infer import _result_csv_row
-from alma3.clinical_result import result_schema_path
+from alma3.clinical_result import result_schema_path, scaled_subtype_score
 import torch
 from alma3.clinical_result import results_from_probabilities, validate_result
 from alma3.dx import DX_TARGETS, Taxonomy
@@ -81,7 +80,8 @@ class ReportingTests(unittest.TestCase):
         r = self.result(p)
         self.assertEqual(r["prediction"]["terminal_index"], 2)
         self.assertEqual(r["accepted"]["classification"], "tb")
-        self.assertEqual(r["decision"]["level"], "subtype")
+        self.assertEqual(r["path"][-1]["level"], "type")
+        self.assertNotIn("level", r["decision"])
 
     def test_subtype_singleton_checks_joint_probability_at_boundary(self):
         for delta in (-1e-12, 0, 1e-12):
@@ -94,8 +94,25 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(r["prediction"]["terminal_index"], 1)
             self.assertEqual(r["prediction"]["subtype_cutoff_passed"], delta >= 0)
             self.assertEqual(r["status"], "fully_resolved" if delta >= 0 else "partially_resolved")
+            before = copy.deepcopy(r)
+            row = _result_csv_row(r)
+            self.assertEqual(r, before)
+            self.assertEqual(row["subtype_scaled_cutoff"], 85)
+            self.assertEqual(f"{row['subtype_scaled_score']:.1f}", "85.0")
+            self.assertEqual(row["result_status"], r["status"])
+            self.assertEqual(row["subtype_scaled_score"] >= 85, delta >= 0)
             if delta < 0:
                 self.assertEqual(len(r["decision"]["differential"]), 1)
+
+    def test_display_scale_is_monotonic_and_preserves_probability_endpoints(self):
+        self.assertEqual([scaled_subtype_score(p) for p in (0, SUBTYPE_CUTOFF, 1)], [0, 85, 100])
+        self.assertAlmostEqual(scaled_subtype_score(.1), 25.788837)
+        self.assertAlmostEqual(scaled_subtype_score(.489), 88.56652788466175, places=12)
+        scores = [scaled_subtype_score(i / 1000) for i in range(1001)]
+        self.assertTrue(all(a < b for a, b in zip(scores, scores[1:])))
+        for invalid in (True, None, "0.5", -.1, 1.1, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                scaled_subtype_score(invalid)
 
     def test_added_upstream_gates_are_rejected(self):
         p = torch.zeros(109, dtype=torch.float64)
@@ -130,14 +147,41 @@ class ReportingTests(unittest.TestCase):
             r = self.result(p)
             self.assertEqual(r["status"], status)
             jsonschema.validate(r, schema)
-            self.assertEqual(_result_csv_row(r)["result_status"], status)
+            self.assertTrue({"kind", "schema_version", "minimum_observed_cpgs"}.isdisjoint(r))
+            self.assertNotIn("manifest_sha256", r["release"])
+            self.assertEqual(r["runtime"], {"device": "cpu"})
+            self.assertNotIn("level", r["accepted"])
+            if r["decision"]:
+                self.assertTrue({"level", "reporting_cutoff"}.isdisjoint(r["decision"]))
+            self.assertEqual(len(_result_csv_row(r)), 29)
+            self.assertNotIn("confidence", r["result_summary"])
+            for node in r["path"]:
+                self.assertNotIn("reporting_cutoff", node)
+                if node["level"] == "subtype":
+                    self.assertNotIn("model_score", node)
+            if r["decision"]:
+                for entry in r["decision"]["differential"]:
+                    self.assertEqual(set(entry), {"index", "classification"})
+            before = copy.deepcopy(r)
+            row = _result_csv_row(r)
+            self.assertEqual(row["result_status"], status)
+            self.assertEqual(r, before)
+            if status == "heme_tumor_not_detected":
+                self.assertEqual(row["subtype_scaled_score"], "")
+                self.assertEqual(row["subtype_scaled_cutoff"], "")
+                self.assertEqual(row["result_summary"], r["result_summary"])
+            else:
+                self.assertNotIn("scaled subtype score", row["result_summary"])
+                self.assertNotIn("/100", row["result_summary"])
+                self.assertEqual(row["result_summary"], r["result_summary"])
+                self.assertEqual(row["subtype_scaled_cutoff"], 85)
 
     def test_nonfinite_probabilities_and_misleading_support_are_rejected(self):
         p = torch.zeros(109, dtype=torch.float64)
         p[0] = 0.1
         p[1] = 0.9
         r = self.result(p)
-        r["minimum_observed_cpgs"] = 4999
+        r["observed_cpg_count"] = 4999
         with self.assertRaisesRegex(ValueError, "support"):
             validate_result(r)
         p[2] = float("nan")

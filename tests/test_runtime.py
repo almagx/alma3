@@ -21,10 +21,8 @@ import torch
 
 from alma3 import ALMA3
 from alma3.cli import main as cli_main
-from alma3.clinical_result import validate_result
-from alma3.config import DxConfig
+from alma3.clinical_result import _result_summary, validate_result
 from alma3.data import CpGManifest
-from alma3.dx import DX_TARGETS
 from tests.helpers import FixtureEnsemble as DiagnosticModel
 from alma3.hashes import publish_new_file as publish_new_file_actual
 from alma3.hashes import runtime_contract_sha256
@@ -41,7 +39,6 @@ from alma3.infer import (
     validate_embedding_sidecar,
 )
 from alma3.infer import main as infer_main
-from alma3.release import RELEASE_FILES, validate_release
 from alma3.runtime import (
     CPU_TORCH_INSTALL_COMMAND,
     MINIMUM_CUDA_AVAILABLE_MEMORY_BYTES,
@@ -53,11 +50,9 @@ from alma3.runtime import (
 )
 from tests.helpers import (
     create_release,
-    sha256,
     validated_release_fixture,
     write_array_csv,
     write_bedmethyl,
-    write_json,
 )
 
 
@@ -397,7 +392,7 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertTrue(all(result["input"]["clipped_value_count"] == 0 for result in results))
             self.assertTrue(all(result["runtime"]["device"] == "cpu" for result in results))
             self.assertTrue(
-                all(result["runtime"]["contract_sha256"] == runtime_contract_sha256() for result in results)
+                all(result["runtime"] == {"device": "cpu"} for result in results)
             )
 
     def test_corrected_beta_policy_accepts_only_bounded_beta_like_rows(self) -> None:
@@ -703,7 +698,7 @@ class RuntimeContractTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-            "070a455c92f036ea10335204e6d1b46f86b6a4bba2085e4a60c987c77f4e62ce",
+            "aeef29129fb8d3cbf911ddadfa8485b5f6523f79da29dc175918d83abf5af551",
         )
         self.assertEqual(manifest["kind"], "alma3_demo_dataset_manifest")
         self.assertEqual(manifest["dataset"]["compressed_bytes"], len(payload))
@@ -834,7 +829,7 @@ class RuntimeContractTests(unittest.TestCase):
             ]
             self.assertEqual(rows, expected)
             self.assertEqual([row["sample_id"] for row in rows], ["sample-1", "sample-2", "sample-3"])
-            self.assertTrue(all(row["result_summary"] == result["result_summary"] for row, result in zip(rows, results, strict=True)))
+            self.assertTrue(all(row["result_summary"] == _result_summary(result) for row, result in zip(rows, results, strict=True)))
             self.assertTrue(all(row["input_format"] == "array-csv" for row in rows))
             self.assertTrue(all(row["input_value_mode"] == "beta" for row in rows))
             self.assertTrue(all(row["input_modification_mode"] == "" for row in rows))
@@ -853,7 +848,8 @@ class RuntimeContractTests(unittest.TestCase):
                 "subtype": "subtype",
             }
             for result, row in zip(results, rows, strict=True):
-                self.assertEqual(row["release_manifest_sha256"], validated["manifest_sha256"])
+                self.assertNotIn("release_manifest_sha256", row)
+                self.assertNotIn("manifest_sha256", result["release"])
                 for field, filename in release_hash_files.items():
                     self.assertEqual(result["release"][field], validated["hashes"][filename])
                 for node in result["path"]:
@@ -863,7 +859,7 @@ class RuntimeContractTests(unittest.TestCase):
                         node["classification"],
                     )
                 if result["decision"] is not None:
-                    target = target_by_level[result["decision"]["level"]]
+                    target = target_by_level["subtype"]
                     for entry in result["decision"]["differential"]:
                         self.assertEqual(
                             validated["taxonomy"].classes[target][entry["index"]],
