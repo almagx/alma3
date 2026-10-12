@@ -4,7 +4,7 @@
     <img src="assets/alma3-a3-signal-monogram-light.svg" alt="ALMA3 A3 symbol" width="96" height="96">
   </picture>
   <h1>ALMA3</h1>
-  <p><strong>Methylation ensemble for hematolymphoid tumors</strong></p>
+  <p><strong>Epigenomic classifier for hematolymphoid tumors</strong></p>
   <p>
     <img alt="Research Use Only" src="https://img.shields.io/badge/Regulatory%20status-Research%20Use%20Only-orange">
   </p>
