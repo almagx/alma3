@@ -2,18 +2,17 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import torch
 
 from . import __version__
-from .dx import DX_TARGETS, PRESENT_LABEL, DxContractError, Taxonomy, apply_temperatures
+from .dx import DX_TARGETS, PRESENT_LABEL, DxContractError, Taxonomy
 from .release import RELEASE_VERSION
 
 RESULT_KIND = "alma3_dx_result"
-RESULT_SCHEMA_VERSION = 2
+RESULT_SCHEMA_VERSION = 3
 RESULT_STATUSES = (
     "no_call",
     "heme_tumor_not_detected",
@@ -32,7 +31,7 @@ TARGET_BY_LEVEL = {
 LEVEL_BY_TARGET = {target: level for level, target in TARGET_BY_LEVEL.items()}
 _RELEASE_HASH_FIELDS = {
     "manifest_sha256",
-    "model_sha256",
+    "ensemble_sha256",
     "taxonomy_sha256",
     "cpg_manifest_sha256",
     "thresholds_sha256",
@@ -75,10 +74,11 @@ def _result_summary(result: dict[str, Any]) -> str:
     if status in ("no_call", "partially_resolved"):
         decision = result["decision"]
         candidate = decision["differential"][0]
+        cutoff_text = f"threshold {float(decision['reporting_cutoff']) * 100.0:.1f}%"
         leading_candidate = (
             f"Leading candidate: {candidate['classification']} "
             f"({float(candidate['model_score']) * 100.0:.1f}% confidence; "
-            f"threshold {float(decision['reporting_cutoff']) * 100.0:.1f}%)."
+            f"{cutoff_text})."
         )
     if status == "no_call":
         return f"Hematolymphoid tumor presence unresolved. {leading_candidate}"
@@ -153,8 +153,8 @@ def _unresolved_decision(
     ranked: list[tuple[int, float]],
     taxonomy: Taxonomy,
 ) -> dict[str, Any]:
-    if len(ranked) != 2:
-        raise DxContractError(f"{level} unresolved decision requires a two-class differential")
+    if not 1 <= len(ranked) <= 2:
+        raise DxContractError(f"{level} unresolved decision requires one or two differential diagnoses")
     labels = taxonomy.classes[TARGET_BY_LEVEL[level]]
     return {
         "level": level,
@@ -177,6 +177,7 @@ def _result(
     status: str,
     path: list[dict[str, Any]],
     decision: dict[str, Any] | None,
+    prediction: dict[str, Any],
 ) -> dict[str, Any]:
     accepted = (
         None
@@ -197,158 +198,59 @@ def _result(
         "accepted": accepted,
         "path": path,
         "decision": decision,
+        "prediction": prediction,
     }
     result["result_summary"] = _result_summary(result)
     validate_result(result)
     return result
 
 
-def results_from_logits(
-    sample_ids: Iterable[str],
-    logits: dict[str, torch.Tensor],
-    thresholds: dict[str, Any],
-    taxonomy: Taxonomy,
-    release: dict[str, str],
-    *,
-    runtime: dict[str, str],
-    input_metadata: Iterable[dict[str, Any]],
-    observed_cpg_counts: Iterable[int],
-    minimum_observed_cpgs: int,
-) -> list[dict[str, Any]]:
+def results_from_probabilities(
+    sample_ids, probabilities, thresholds, taxonomy, release, *, runtime,
+    input_metadata, observed_cpg_counts, minimum_observed_cpgs,
+):
+    """Apply reporting gates to the frozen selected path without changing the decoder."""
+    from .terminal import selected_path_scores, SUBTYPE_CUTOFF
     _validate_release(release)
     _validate_runtime(runtime)
-    scaled = apply_temperatures(logits, thresholds, taxonomy)
-    ids = list(sample_ids)
-    inputs = list(input_metadata)
-    observed_counts = list(observed_cpg_counts)
-    batch = next(iter(scaled.values())).shape[0]
-    try:
-        for sample_id in ids:
-            validate_sample_id(sample_id)
-    except ValueError as error:
-        raise DxContractError(f"result {error}") from error
-    if (
-        len(ids) != batch
-        or len(inputs) != batch
-        or len(ids) != len(set(ids))
-        or len(observed_counts) != batch
-        or type(minimum_observed_cpgs) is not int
-        or minimum_observed_cpgs <= 0
-        or any(type(count) is not int or count < minimum_observed_cpgs for count in observed_counts)
-    ):
-        raise DxContractError("result sample IDs must be non-empty, unique, and aligned with logits")
-    for metadata, observed_count in zip(inputs, observed_counts, strict=True):
-        _validate_input(metadata, observed_count)
-
-    stops = {LEVEL_BY_TARGET[target]: float(thresholds["thresholds"][target]) for target in DX_TARGETS}
-    present_idx = taxonomy.classes["hematolymphoid_tumor_presence"].index(PRESENT_LABEL)
+    selected, chosen, scores, distributions = selected_path_scores(probabilities, taxonomy)
+    ids, inputs, counts = list(sample_ids), list(input_metadata), list(observed_cpg_counts)
+    if (not ids or len(ids) != len(set(ids)) or len(ids) != len(probabilities)
+            or len(inputs) != len(ids) or len(counts) != len(ids)
+            or minimum_observed_cpgs != 5000 or any(type(n) is not int or n < 5000 for n in counts)):
+        raise DxContractError('result identities and observed CpG counts must match the prediction batch')
+    cuts = [float(thresholds['thresholds'][key]) for key in DX_TARGETS]
+    if cuts != [0., 0., 0., 0., SUBTYPE_CUTOFF]:
+        raise DxContractError('reporting uses only the frozen subtype cutoff')
     results = []
-    for row_idx, (sample_id, input_info, observed_cpg_count) in enumerate(
-        zip(ids, inputs, observed_counts, strict=True)
-    ):
-        path: list[dict[str, Any]] = []
-        presence = torch.softmax(scaled["hematolymphoid_tumor_presence"][row_idx].float(), dim=-1)
-        presence_ranked = _rank_candidates(presence, list(range(len(presence))), limit=2)
-        presence_pred, presence_score = presence_ranked[0]
-        if presence_score < stops["presence"]:
-            results.append(
-                _result(
-                    sample_id,
-                    release,
-                    runtime,
-                    input_info,
-                    observed_cpg_count,
-                    minimum_observed_cpgs,
-                    "no_call",
-                    path,
-                    _unresolved_decision(
-                        "presence",
-                        stops["presence"],
-                        presence_ranked,
-                        taxonomy,
-                    ),
-                )
-            )
-            continue
-        path.append(
-            _path_node(
-                "presence",
-                "resolved",
-                presence_pred,
-                presence_score,
-                stops["presence"],
-                taxonomy,
-            )
-        )
-        if presence_pred != present_idx:
-            results.append(
-                _result(
-                    sample_id,
-                    release,
-                    runtime,
-                    input_info,
-                    observed_cpg_count,
-                    minimum_observed_cpgs,
-                    "heme_tumor_not_detected",
-                    path,
-                    None,
-                )
-            )
-            continue
-
-        parent_idx: int | None = presence_pred
-        terminal = False
-        for level in RESULT_LEVELS[1:]:
-            indices = _child_indices(level, None if level == "lineage" else parent_idx, taxonomy)
-            if not indices:
-                terminal = True
+    for i, (sample_id, metadata, count) in enumerate(zip(ids, inputs, counts, strict=True)):
+        validate_sample_id(sample_id)
+        _validate_input(metadata, count)
+        path, decision = [], None
+        terminal = int(selected[i])
+        prediction = dict(decision_rule='type_first_v1', terminal_index=terminal,
+                          path=chosen[i].tolist(), probabilities=probabilities[i].tolist(),
+                          subtype_cutoff_passed=bool(chosen[i, 4] >= 0 and probabilities[i, terminal] >= SUBTYPE_CUTOFF))
+        for j, level in enumerate(RESULT_LEVELS):
+            index = int(chosen[i, j])
+            if index < 0:
                 break
-            if len(indices) == 1:
-                parent_idx = indices[0]
-                path.append(_path_node(level, "implied", parent_idx, None, None, taxonomy))
-                continue
-
-            target = TARGET_BY_LEVEL[level]
-            mask = torch.zeros_like(scaled[target][row_idx], dtype=torch.bool)
-            mask[indices] = True
-            probabilities = torch.softmax(
-                scaled[target][row_idx].float().masked_fill(~mask, -torch.inf), dim=-1
-            )
-            ranked = _rank_candidates(probabilities, indices, limit=2)
-            pred, score = ranked[0]
-            if score < stops[level]:
-                results.append(
-                    _result(
-                        sample_id,
-                        release,
-                        runtime,
-                        input_info,
-                        observed_cpg_count,
-                        minimum_observed_cpgs,
-                        "partially_resolved",
-                        path,
-                        _unresolved_decision(level, stops[level], ranked, taxonomy),
-                    )
-                )
+            parent = None if j < 2 else int(chosen[i, j - 1])
+            indices = list(range(2)) if j == 0 else _child_indices(level, parent, taxonomy)
+            # A subtype always uses the joint probability gate, including singleton branches.
+            implied = j in (1, 2, 3) and len(indices) == 1
+            score = float(scores[i, j])
+            if not implied and score < cuts[j]:
+                ranked = _rank_candidates(distributions[j][i], indices, limit=2)
+                decision = _unresolved_decision(level, cuts[j], ranked, taxonomy)
+                decision.update(selected_index=index, selected_score=score)
                 break
-            path.append(_path_node(level, "resolved", pred, score, stops[level], taxonomy))
-            parent_idx = pred
-        else:
-            terminal = True
-        if terminal:
-            results.append(
-                _result(
-                    sample_id,
-                    release,
-                    runtime,
-                    input_info,
-                    observed_cpg_count,
-                    minimum_observed_cpgs,
-                    "fully_resolved",
-                    path,
-                    None,
-                )
-            )
+            path.append(_path_node(level, 'implied' if implied else 'resolved', index,
+                                   None if implied else score, None if implied else cuts[j], taxonomy))
+        status = ('no_call' if not path else 'partially_resolved') if decision else (
+            'heme_tumor_not_detected' if terminal == 0 else 'fully_resolved')
+        results.append(_result(sample_id, release, runtime, metadata, count, minimum_observed_cpgs,
+                               status, path, decision, prediction))
     return results
 
 
@@ -460,6 +362,7 @@ def validate_result(result: Any) -> None:
         "accepted",
         "path",
         "decision",
+        "prediction",
     }
     if not isinstance(result, dict) or set(result) != fields:
         raise DxContractError("Dx result fields are invalid")
@@ -476,7 +379,7 @@ def validate_result(result: Any) -> None:
     if (
         type(observed_count) is not int
         or type(minimum_observed) is not int
-        or minimum_observed <= 0
+        or minimum_observed != 5000
         or observed_count < minimum_observed
     ):
         raise DxContractError("Dx result observed-CpG support is invalid")
@@ -535,6 +438,8 @@ def validate_result(result: Any) -> None:
             "status",
             "reporting_cutoff",
             "differential",
+            "selected_index",
+            "selected_score",
         }:
             raise DxContractError("Dx result decision fields are invalid")
         if decision["status"] != "unresolved":
@@ -542,13 +447,14 @@ def validate_result(result: Any) -> None:
         next_position = len(path)
         if next_position >= len(RESULT_LEVELS) or decision["level"] != RESULT_LEVELS[next_position]:
             raise DxContractError("Dx result decision must be the first unresolved level")
-        _validate_score(decision["reporting_cutoff"], "Dx result decision reporting cutoff")
+        _validate_score(decision['reporting_cutoff'], 'reporting cutoff')
+        _validate_score(decision['selected_score'], 'selected path score')
         differential = decision["differential"]
-        if not isinstance(differential, list) or len(differential) != 2:
-            raise DxContractError("Dx result decision must contain a two-class differential")
+        if not isinstance(differential, list) or not 1 <= len(differential) <= 2:
+            raise DxContractError("Dx result decision must contain one or two differential diagnoses")
         for position, entry in enumerate(differential, start=1):
             _validate_differential_entry(entry, f"Dx result differential entry {position}")
-        if len({entry["index"] for entry in differential}) != 2:
+        if len({entry["index"] for entry in differential}) != len(differential):
             raise DxContractError("Dx result differential indices must be unique")
         expected_order = sorted(
             differential,
@@ -556,11 +462,37 @@ def validate_result(result: Any) -> None:
         )
         if differential != expected_order:
             raise DxContractError("Dx result differential is not ranked deterministically")
-        if float(differential[0]["model_score"]) >= float(decision["reporting_cutoff"]):
+        if float(decision["selected_score"]) >= float(decision["reporting_cutoff"]):
             raise DxContractError(
                 "Dx result unresolved classification meets its reporting cutoff"
             )
 
+    prediction = result['prediction']
+    if (not isinstance(prediction, dict) or set(prediction) != {'decision_rule', 'terminal_index', 'path', 'probabilities', 'subtype_cutoff_passed'}
+            or prediction['decision_rule'] != 'type_first_v1' or type(prediction['terminal_index']) is not int
+            or not 0 <= prediction['terminal_index'] < 109
+            or not isinstance(prediction['path'], list) or len(prediction['path']) != 5
+            or any(type(i) is not int or i < -1 for i in prediction['path'])
+            or not isinstance(prediction['probabilities'], list) or len(prediction['probabilities']) != 109
+            or type(prediction['subtype_cutoff_passed']) is not bool):
+        raise DxContractError('invalid selected diagnosis record')
+    for probability in prediction['probabilities']:
+        _validate_score(probability, 'terminal probability')
+    if abs(sum(prediction['probabilities']) - 1.) > 3e-6:
+        raise DxContractError('terminal probabilities must sum to one')
+    from .terminal import SUBTYPE_CUTOFF
+    eligible = prediction['path'][4] >= 0 and prediction['probabilities'][prediction['terminal_index']] >= SUBTYPE_CUTOFF
+    if prediction['subtype_cutoff_passed'] != eligible:
+        raise DxContractError('subtype cutoff eligibility differs from the selected terminal probability')
+    if any(node['reporting_cutoff'] != (SUBTYPE_CUTOFF if node['level'] == 'subtype' else 0.)
+           for node in path if node['status'] == 'resolved'):
+        raise DxContractError('reporting uses only the frozen subtype cutoff')
+    if decision and (decision['level'] != 'subtype' or decision['reporting_cutoff'] != SUBTYPE_CUTOFF):
+        raise DxContractError('only a subtype may be withheld')
+    if any(node['index'] != prediction['path'][i] for i, node in enumerate(path)):
+        raise DxContractError('reporting must preserve the selected diagnostic path')
+    if decision and (decision['selected_index'] != prediction['path'][len(path)]):
+        raise DxContractError('unresolved decision must preserve the selected diagnostic path')
     expected_decision = result["status"] in ("no_call", "partially_resolved")
     if (decision is not None) is not expected_decision:
         raise DxContractError("Dx result status and decision are inconsistent")

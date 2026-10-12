@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://almagenomics.com/schemas/alma3_embedding_sidecar/v1",
+  "$id": "https://almagenomics.com/schemas/alma3_embedding_sidecar/v2",
   "title": "ALMA3 embedding sidecar",
   "type": "object",
   "additionalProperties": false,
@@ -13,53 +13,94 @@
     "samples"
   ],
   "properties": {
-    "kind": {"const": "alma3_embedding_sidecar"},
-    "schema_version": {"const": 1},
+    "kind": {
+      "const": "alma3_embedding_sidecar"
+    },
+    "schema_version": {
+      "const": 2
+    },
     "release": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "manifest_sha256",
-        "model_sha256",
+        "ensemble_sha256",
         "taxonomy_sha256",
         "cpg_manifest_sha256",
         "thresholds_sha256"
       ],
       "properties": {
-        "manifest_sha256": {"$ref": "#/$defs/sha256"},
-        "model_sha256": {"$ref": "#/$defs/sha256"},
-        "taxonomy_sha256": {"$ref": "#/$defs/sha256"},
-        "cpg_manifest_sha256": {"$ref": "#/$defs/sha256"},
-        "thresholds_sha256": {"$ref": "#/$defs/sha256"}
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ensemble_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "taxonomy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cpg_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "thresholds_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
       }
     },
     "representation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "version", "dtype", "dimensions"],
+      "required": [
+        "name",
+        "version",
+        "dtype",
+        "dimensions"
+      ],
       "properties": {
-        "name": {"const": "diagnostic_trunk_embedding"},
-        "version": {"const": 1},
-        "dtype": {"const": "float32"},
-        "dimensions": {"const": 1536}
+        "name": {
+          "const": "final_ten_member_probabilities"
+        },
+        "version": {
+          "const": 1
+        },
+        "dtype": {
+          "const": "float32"
+        },
+        "dimensions": {
+          "const": 1090
+        }
       }
     },
-    "minimum_observed_cpgs": {"type": "integer", "minimum": 1},
+    "minimum_observed_cpgs": {
+      "const": 5000
+    },
     "samples": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["sample_id", "observed_cpg_count", "embedding"],
+        "required": [
+          "sample_id",
+          "observed_cpg_count",
+          "embedding"
+        ],
         "properties": {
-          "sample_id": {"type": "string", "minLength": 1},
-          "observed_cpg_count": {"type": "integer", "minimum": 1},
+          "sample_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observed_cpg_count": {
+            "type": "integer",
+            "minimum": 5000
+          },
           "embedding": {
             "type": "array",
-            "minItems": 1536,
-            "maxItems": 1536,
-            "items": {"type": "number"}
+            "minItems": 1090,
+            "maxItems": 1090,
+            "items": {
+              "type": "number"
+            }
           }
         }
       }

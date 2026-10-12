@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEMO_GZIP_SHA256 = "c7fd2afcba9b4830b9774cc646ccd060c7d48de9b0002fb9bebf77e551e45a37"
-DEMO_MANIFEST_SHA256 = "1ee42be811e5373d28ed6a2cd8bea895ea1df574fdb1de520e2f77d13354bcee"
+DEMO_GZIP_SHA256 = "6e8a5dfae9bb0c63e69c1e9a186b4bd01ea2550c5460134b453a457166e8060f"
+DEMO_MANIFEST_SHA256 = "070a455c92f036ea10335204e6d1b46f86b6a4bba2085e4a60c987c77f4e62ce"
 CANDIDATE_KIND = "alma3_docker_release_candidate_acceptance"
 CANDIDATE_SCHEMA_VERSION = 1
 CANDIDATE_MARKER = "ACCEPTANCE_COMPLETE"
@@ -173,7 +173,7 @@ def _image_identity(tag: str, source_commit: str) -> dict[str, Any]:
         or type(identity["size_bytes"]) is not int
         or identity["size_bytes"] <= 0
         or identity["revision"] != source_commit
-        or identity["version"] != "3.0.0"
+        or identity["version"] != "3.1.0"
     ):
         raise RuntimeError(f"Docker image has an invalid release identity: {identity}")
     return identity
@@ -223,13 +223,13 @@ def inspect_demo(release: Path) -> Path:
     if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != DEMO_MANIFEST_SHA256:
         raise RuntimeError("packaged demo manifest SHA-256 mismatch")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("kind") != "alma3_demo_dataset_manifest" or manifest.get("schema_version") != 1:
+    if manifest.get("kind") != "alma3_demo_dataset_manifest" or manifest.get("schema_version") != 2:
         raise RuntimeError("packaged demo manifest contract is invalid")
     dataset = manifest.get("dataset", {})
     if (
         dataset.get("compressed_sha256") != DEMO_GZIP_SHA256
         or dataset.get("compressed_bytes") != len(payload)
-        or dataset.get("sample_count") != 16
+        or dataset.get("sample_count") != 13
         or dataset.get("cpg_count") != 65_536
         or len(payload) > 2_500_000
     ):
@@ -245,8 +245,7 @@ def inspect_demo(release: Path) -> Path:
         raise RuntimeError("packaged demo gzip is not deterministic")
     expected_release = {
         "version": validated["release"]["version"],
-        "manifest_sha256": validated["manifest_sha256"],
-        "model_sha256": validated["hashes"]["model.safetensors"],
+        "ensemble_sha256": validated["hashes"]["ensemble.json"],
         "taxonomy_sha256": validated["hashes"]["taxonomy.json"],
         "cpg_manifest_sha256": validated["hashes"]["cpg_manifest.json"],
         "thresholds_sha256": validated["hashes"]["thresholds.json"],
@@ -256,9 +255,9 @@ def inspect_demo(release: Path) -> Path:
     reader = csv.reader(io.StringIO(decompressed.decode("utf-8"), newline=""))
     header = next(reader)
     rows = list(reader)
-    if header != ["sample_id", *validated["cpg"].cpg_ids]:
+    if header[0] != "sample_id" or len(set(header[1:])) != len(header)-1 or not set(header[1:]) <= set(validated["cpg"].cpg_ids):
         raise RuntimeError("packaged demo CpG columns do not match the release")
-    expected_ids = [f"demo_{index:02d}" for index in range(1, 17)]
+    expected_ids = [sample["sample_id"] for sample in manifest["samples"]]
     if [row[0] for row in rows] != expected_ids or any(len(row) != len(header) for row in rows):
         raise RuntimeError("packaged demo sample rows are invalid")
     parsed: list[tuple[str, int, int]] = []
@@ -290,8 +289,8 @@ def inspect_demo_results(jsonl: Path, manifest_path: Path) -> None:
     from alma3.clinical_result import validate_result
 
     rows = [json.loads(line) for line in jsonl.read_text(encoding="utf-8").splitlines()]
-    if len(rows) != 16:
-        raise RuntimeError("demo output must contain exactly 16 results")
+    if len(rows) != 13:
+        raise RuntimeError("demo output must contain exactly 13 results")
     for row in rows:
         validate_result(row)
     observed = [
@@ -320,17 +319,17 @@ def inspect_demo_results(jsonl: Path, manifest_path: Path) -> None:
 def _release_identity(release: Path) -> dict[str, Any]:
     sys.path.insert(0, str(ROOT / "src"))
     from alma3.hashes import sha256_file
-    from alma3.release import RELEASE_FILES, validate_release
+    from alma3.release import validate_release
 
     validated = validate_release(release, device="cpu", load_model=False)
     return {
         "cpg_manifest_sha256": validated["hashes"]["cpg_manifest.json"],
         "files": {
             name: {"sha256": sha256_file(release / name), "size": (release / name).stat().st_size}
-            for name in sorted(RELEASE_FILES)
+            for name in sorted(set(validated['hashes']) | {'SHA256SUMS.json', 'RELEASE_COMPLETE'})
         },
         "manifest_sha256": validated["manifest_sha256"],
-        "model_sha256": validated["hashes"]["model.safetensors"],
+        "ensemble_sha256": validated["hashes"]["ensemble.json"],
         "release_metadata": validated["release"],
         "taxonomy_sha256": validated["hashes"]["taxonomy.json"],
         "thresholds_sha256": validated["hashes"]["thresholds.json"],
@@ -348,7 +347,7 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
     directories = {path.relative_to(candidate).as_posix() for path in paths if path.is_dir()}
     if directories != {"image"}:
         raise RuntimeError("release candidate directory layout is invalid")
-    image_name = "image/alma3-3.0.0-cpu.tar"
+    image_name = "image/alma3-3.1.0-cpu.tar"
     payloads = {"acceptance.json", image_name}
     if files != payloads | {"SHA256SUMS.json", CANDIDATE_MARKER}:
         raise RuntimeError("release candidate file set is invalid")
@@ -384,7 +383,7 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
 
 def _expected_candidate_name(source: dict[str, Any], release_identity: dict[str, Any]) -> str:
     return (
-        f"alma3-3.0.0-docker-{source['commit'][:8]}-"
+        f"alma3-3.1.0-docker-{source['commit'][:8]}-"
         f"{release_identity['manifest_sha256'][:8]}"
     )
 
@@ -410,7 +409,7 @@ def _seal_candidate(
 
     image_identity = _image_identity(image_tag, source["commit"])
     with _atomic_candidate(output) as temporary:
-        image_output = temporary / "image" / "alma3-3.0.0-cpu.tar"
+        image_output = temporary / "image" / "alma3-3.1.0-cpu.tar"
         image_output.parent.mkdir(parents=True)
         run(["docker", "image", "save", "--output", str(image_output), image_tag])
         with image_output.open("rb") as handle:
@@ -423,8 +422,8 @@ def _seal_candidate(
             raise RuntimeError("Docker archive round trip changed the tested image")
 
         publication_tags = [
-            f"{PUBLIC_IMAGE}:3.0.0",
-            f"{PUBLIC_IMAGE}:3.0.0-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}",
+            f"{PUBLIC_IMAGE}:3.1.0",
+            f"{PUBLIC_IMAGE}:3.1.0-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}",
         ]
         acceptance = {
             "citation": citation,
@@ -460,7 +459,7 @@ def _seal_candidate(
         _write_new(temporary / "acceptance.json", _canonical_json(acceptance))
         checksums = {
             "acceptance.json": _sha256(temporary / "acceptance.json"),
-            "image/alma3-3.0.0-cpu.tar": image_archive_sha256,
+            "image/alma3-3.1.0-cpu.tar": image_archive_sha256,
         }
         _write_new(temporary / "SHA256SUMS.json", _canonical_json(checksums))
         for name, expected in checksums.items():
@@ -504,7 +503,7 @@ def main() -> int:
 
     source_contract = runtime_contract(ROOT / "src" / "alma3")
     manifest_path = inspect_demo(release)
-    image_tag = f"{PUBLIC_IMAGE}:3.0.0-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}"
+    image_tag = f"{PUBLIC_IMAGE}:3.1.0-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}"
     run(
         [
             "docker",
@@ -520,7 +519,7 @@ def main() -> int:
             "--label",
             f"org.opencontainers.image.revision={source['commit']}",
             "--label",
-            "org.opencontainers.image.version=3.0.0",
+            "org.opencontainers.image.version=3.1.0",
             "-t",
             image_tag,
             ".",

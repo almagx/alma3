@@ -6,7 +6,7 @@ if TYPE_CHECKING:
     from .runtime import ALMA3
 
 __all__ = ["ALMA3", "__version__"]
-__version__ = "3.0.0"
+__version__ = "3.1.0"
 
 
 def __getattr__(name: str) -> Any:

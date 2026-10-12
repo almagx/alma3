@@ -17,46 +17,128 @@
     "status",
     "accepted",
     "path",
-    "decision"
+    "decision",
+    "prediction"
   ],
   "properties": {
-    "kind": {"const": "alma3_dx_result"},
-    "schema_version": {"const": 2},
+    "kind": {
+      "const": "alma3_dx_result"
+    },
+    "schema_version": {
+      "const": 3
+    },
     "sample_id": {
       "type": "string",
       "minLength": 1,
       "pattern": "^(?![=+@-])(?!\\s)(?!.*\\s$)[^\\u0000-\\u001f\\u007f]+$"
     },
-    "result_summary": {"type": "string", "minLength": 1, "pattern": "^[^\\r\\n]+$"},
-    "release": {"$ref": "#/$defs/release"},
-    "runtime": {"$ref": "#/$defs/runtime"},
-    "input": {"$ref": "#/$defs/input"},
-    "observed_cpg_count": {"type": "integer", "minimum": 1},
-    "minimum_observed_cpgs": {"type": "integer", "minimum": 1},
+    "result_summary": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\r\\n]+$"
+    },
+    "release": {
+      "$ref": "#/$defs/release"
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "input": {
+      "$ref": "#/$defs/input"
+    },
+    "observed_cpg_count": {
+      "type": "integer",
+      "minimum": 5000
+    },
+    "minimum_observed_cpgs": {
+      "const": 5000
+    },
     "status": {
-      "enum": ["no_call", "heme_tumor_not_detected", "fully_resolved", "partially_resolved"]
+      "enum": [
+        "no_call",
+        "heme_tumor_not_detected",
+        "fully_resolved",
+        "partially_resolved"
+      ]
     },
     "accepted": {
       "oneOf": [
-        {"type": "null"},
-        {"$ref": "#/$defs/identityNode"}
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/identityNode"
+        }
       ]
     },
     "path": {
       "type": "array",
       "maxItems": 5,
-      "items": {"$ref": "#/$defs/pathNode"}
+      "items": {
+        "$ref": "#/$defs/pathNode"
+      }
     },
     "decision": {
       "oneOf": [
-        {"type": "null"},
-        {"$ref": "#/$defs/unresolvedDecision"}
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/unresolvedDecision"
+        }
       ]
+    },
+    "prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision_rule",
+        "terminal_index",
+        "path",
+        "probabilities",
+        "subtype_cutoff_passed"
+      ],
+      "properties": {
+        "decision_rule": {
+          "const": "type_first_v1"
+        },
+        "terminal_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 108
+        },
+        "path": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": -1
+          }
+        },
+        "probabilities": {
+          "type": "array",
+          "minItems": 109,
+          "maxItems": 109,
+          "items": {
+            "$ref": "#/$defs/probability"
+          }
+        },
+        "subtype_cutoff_passed": {
+          "type": "boolean"
+        }
+      }
     }
   },
   "$defs": {
     "level": {
-      "enum": ["presence", "lineage", "family", "type", "subtype"]
+      "enum": [
+        "presence",
+        "lineage",
+        "family",
+        "type",
+        "subtype"
+      ]
     },
     "sha256": {
       "type": "string",
@@ -73,95 +155,214 @@
       "required": [
         "version",
         "manifest_sha256",
-        "model_sha256",
+        "ensemble_sha256",
         "taxonomy_sha256",
         "cpg_manifest_sha256",
         "thresholds_sha256"
       ],
       "properties": {
-        "version": {"const": "3.0.0"},
-        "manifest_sha256": {"$ref": "#/$defs/sha256"},
-        "model_sha256": {"$ref": "#/$defs/sha256"},
-        "taxonomy_sha256": {"$ref": "#/$defs/sha256"},
-        "cpg_manifest_sha256": {"$ref": "#/$defs/sha256"},
-        "thresholds_sha256": {"$ref": "#/$defs/sha256"}
+        "version": {
+          "const": "3.1.0"
+        },
+        "manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ensemble_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "taxonomy_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cpg_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "thresholds_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
       }
     },
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["package_version", "contract_sha256", "device"],
+      "required": [
+        "package_version",
+        "contract_sha256",
+        "device"
+      ],
       "properties": {
-        "package_version": {"const": "3.0.0"},
-        "contract_sha256": {"$ref": "#/$defs/sha256"},
-        "device": {"type": "string", "pattern": "^(cpu|cuda:(0|[1-9][0-9]*))$"}
+        "package_version": {
+          "const": "3.1.0"
+        },
+        "contract_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "device": {
+          "type": "string",
+          "pattern": "^(cpu|cuda:(0|[1-9][0-9]*))$"
+        }
       }
     },
     "input": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["format", "value_mode", "clipped_value_count"],
+      "required": [
+        "format",
+        "value_mode",
+        "clipped_value_count"
+      ],
       "properties": {
-        "format": {"enum": ["array", "array-csv", "bedmethyl"]},
-        "value_mode": {"enum": ["beta", "mvalue", "fraction_modified"]},
-        "modification_mode": {"enum": ["5mc", "5mc_plus_5hmc"]},
-        "clipped_value_count": {"type": "integer", "minimum": 0}
+        "format": {
+          "enum": [
+            "array",
+            "array-csv",
+            "bedmethyl"
+          ]
+        },
+        "value_mode": {
+          "enum": [
+            "beta",
+            "mvalue",
+            "fraction_modified"
+          ]
+        },
+        "modification_mode": {
+          "enum": [
+            "5mc",
+            "5mc_plus_5hmc"
+          ]
+        },
+        "clipped_value_count": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "oneOf": [
         {
           "properties": {
-            "format": {"enum": ["array", "array-csv"]},
-            "value_mode": {"const": "beta"}
+            "format": {
+              "enum": [
+                "array",
+                "array-csv"
+              ]
+            },
+            "value_mode": {
+              "const": "beta"
+            }
           },
-          "not": {"required": ["modification_mode"]}
+          "not": {
+            "required": [
+              "modification_mode"
+            ]
+          }
         },
         {
           "properties": {
-            "format": {"enum": ["array", "array-csv"]},
-            "value_mode": {"const": "mvalue"},
-            "clipped_value_count": {"const": 0}
+            "format": {
+              "enum": [
+                "array",
+                "array-csv"
+              ]
+            },
+            "value_mode": {
+              "const": "mvalue"
+            },
+            "clipped_value_count": {
+              "const": 0
+            }
           },
-          "not": {"required": ["modification_mode"]}
+          "not": {
+            "required": [
+              "modification_mode"
+            ]
+          }
         },
         {
           "properties": {
-            "format": {"const": "bedmethyl"},
-            "value_mode": {"const": "fraction_modified"},
-            "clipped_value_count": {"const": 0}
+            "format": {
+              "const": "bedmethyl"
+            },
+            "value_mode": {
+              "const": "fraction_modified"
+            },
+            "clipped_value_count": {
+              "const": 0
+            }
           },
-          "required": ["modification_mode"]
+          "required": [
+            "modification_mode"
+          ]
         }
       ]
     },
     "identityNode": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["level", "index", "classification"],
+      "required": [
+        "level",
+        "index",
+        "classification"
+      ],
       "properties": {
-        "level": {"$ref": "#/$defs/level"},
-        "index": {"type": "integer", "minimum": 0},
-        "classification": {"type": "string", "minLength": 1}
+        "level": {
+          "$ref": "#/$defs/level"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classification": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "pathNode": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["level", "status", "index", "classification", "model_score", "reporting_cutoff"],
+      "required": [
+        "level",
+        "status",
+        "index",
+        "classification",
+        "model_score",
+        "reporting_cutoff"
+      ],
       "properties": {
-        "level": {"$ref": "#/$defs/level"},
-        "status": {"enum": ["resolved", "implied"]},
-        "index": {"type": "integer", "minimum": 0},
-        "classification": {"type": "string", "minLength": 1},
+        "level": {
+          "$ref": "#/$defs/level"
+        },
+        "status": {
+          "enum": [
+            "resolved",
+            "implied"
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classification": {
+          "type": "string",
+          "minLength": 1
+        },
         "model_score": {
           "oneOf": [
-            {"type": "null"},
-            {"$ref": "#/$defs/probability"}
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/probability"
+            }
           ]
         },
         "reporting_cutoff": {
           "oneOf": [
-            {"type": "null"},
-            {"$ref": "#/$defs/probability"}
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/probability"
+            }
           ]
         }
       }
@@ -169,27 +370,61 @@
     "unresolvedDecision": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["level", "status", "reporting_cutoff", "differential"],
+      "required": [
+        "level",
+        "status",
+        "reporting_cutoff",
+        "differential",
+        "selected_index",
+        "selected_score"
+      ],
       "properties": {
-        "level": {"$ref": "#/$defs/level"},
-        "status": {"const": "unresolved"},
-        "reporting_cutoff": {"$ref": "#/$defs/probability"},
+        "level": {
+          "$ref": "#/$defs/level"
+        },
+        "status": {
+          "const": "unresolved"
+        },
+        "reporting_cutoff": {
+          "$ref": "#/$defs/probability"
+        },
         "differential": {
           "type": "array",
-          "minItems": 2,
+          "minItems": 1,
           "maxItems": 2,
-          "items": {"$ref": "#/$defs/differentialEntry"}
+          "items": {
+            "$ref": "#/$defs/differentialEntry"
+          }
+        },
+        "selected_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "selected_score": {
+          "$ref": "#/$defs/probability"
         }
       }
     },
     "differentialEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["index", "classification", "model_score"],
+      "required": [
+        "index",
+        "classification",
+        "model_score"
+      ],
       "properties": {
-        "index": {"type": "integer", "minimum": 0},
-        "classification": {"type": "string", "minLength": 1},
-        "model_score": {"$ref": "#/$defs/probability"}
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classification": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_score": {
+          "$ref": "#/$defs/probability"
+        }
       }
     }
   }

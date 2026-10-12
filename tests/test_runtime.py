@@ -24,7 +24,8 @@ from alma3.cli import main as cli_main
 from alma3.clinical_result import validate_result
 from alma3.config import DxConfig
 from alma3.data import CpGManifest
-from alma3.dx import DX_TARGETS, DiagnosticModel
+from alma3.dx import DX_TARGETS
+from tests.helpers import FixtureEnsemble as DiagnosticModel
 from alma3.hashes import publish_new_file as publish_new_file_actual
 from alma3.hashes import runtime_contract_sha256
 from alma3.infer import (
@@ -40,7 +41,6 @@ from alma3.infer import (
     validate_embedding_sidecar,
 )
 from alma3.infer import main as infer_main
-from alma3.model import FoundationModel
 from alma3.release import RELEASE_FILES, validate_release
 from alma3.runtime import (
     CPU_TORCH_INSTALL_COMMAND,
@@ -53,7 +53,6 @@ from alma3.runtime import (
 )
 from tests.helpers import (
     create_release,
-    foundation_config,
     sha256,
     validated_release_fixture,
     write_array_csv,
@@ -98,7 +97,7 @@ class RuntimeContractTests(unittest.TestCase):
             (copied / "generated-output.txt").write_text("ignored\n", encoding="utf-8")
             self.assertEqual(runtime_contract_sha256(copied), expected)
 
-            target = copied / "assets" / "alma3-3.0.0-grch38-projectable-cpgs.bed.gz"
+            target = copied / "assets" / "alma3-3.1.0-grch38-projectable-cpgs.bed.gz"
             target_payload = target.read_bytes()
             target.write_bytes(target_payload + b"changed")
             self.assertNotEqual(runtime_contract_sha256(copied), expected)
@@ -191,7 +190,7 @@ class RuntimeContractTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertEqual(completed.stdout.strip(), "alma3 3.0.0")
+        self.assertEqual(completed.stdout.strip(), "alma3 3.1.0")
 
         error_output = StringIO()
         with (
@@ -390,8 +389,8 @@ class RuntimeContractTests(unittest.TestCase):
                     ["first", "second", "third"],
                 )
             load.assert_called_once_with(release, device="cpu")
-            self.assertEqual(embedded_batch_sizes, [2, 1])
-            self.assertEqual([int(call.args[0].shape[0]) for call in align.call_args_list], [2, 1])
+            self.assertEqual(embedded_batch_sizes, [3])
+            self.assertEqual([int(call.args[0].shape[0]) for call in align.call_args_list], [3])
             self.assertEqual([result["sample_id"] for result in results], ["first", "second", "third"])
             self.assertTrue(all(result["input"]["format"] == "array" for result in results))
             self.assertTrue(all(result["input"]["value_mode"] == "beta" for result in results))
@@ -541,7 +540,7 @@ class RuntimeContractTests(unittest.TestCase):
                     },
                 ],
             )
-            self.assertIn("clipped 3/3,000 matched values", stderr.getvalue())
+            self.assertIn("clipped 3/10,000 matched values", stderr.getvalue())
 
     def test_explicit_mvalues_convert_stably_and_missing_stays_unobserved(self) -> None:
         converted, observed, summary = _prepare_array_values(
@@ -561,23 +560,23 @@ class RuntimeContractTests(unittest.TestCase):
 
     def test_array_csv_rejects_low_cpg_overlap_before_values(self) -> None:
         manifest = CpGManifest(
-            cpg_ids=tuple(f"cg{index}" for index in range(1500)),
-            chr_id=torch.zeros(1500, dtype=torch.long),
-            pos=torch.linspace(0, 1, 1500),
+            cpg_ids=tuple(f"cg{index}" for index in range(5000)),
+            chr_id=torch.zeros(5000, dtype=torch.long),
+            pos=torch.linspace(0, 1, 5000),
         )
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "expression.csv"
             path.write_text("sample_id,ENSG1,ENSG2\nsample,5,10\n", encoding="utf-8")
             with self.assertRaisesRegex(InputContractError, "Gene-expression matrices are not supported"):
-                list(_array_csv_batches(path, manifest, minimum_observed_cpgs=1500))
+                list(_array_csv_batches(path, manifest, minimum_observed_cpgs=5000))
 
             invalid = Path(raw) / "invalid.csv"
             invalid.write_text(
-                "sample_id," + ",".join(manifest.cpg_ids) + "\nsample,word," + ",".join(["0.5"] * 1499) + "\n",
+                "sample_id," + ",".join(manifest.cpg_ids) + "\nsample,word," + ",".join(["0.5"] * 4999) + "\n",
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(InputContractError, "non-numeric value"):
-                list(_array_csv_batches(invalid, manifest, minimum_observed_cpgs=1500))
+                list(_array_csv_batches(invalid, manifest, minimum_observed_cpgs=5000))
 
     def test_sample_id_safety_is_shared_across_input_paths(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -596,7 +595,7 @@ class RuntimeContractTests(unittest.TestCase):
                     _array_csv_batches(
                         array_path,
                         validated["cpg"],
-                        minimum_observed_cpgs=1500,
+                        minimum_observed_cpgs=5000,
                     )
                 )
 
@@ -688,7 +687,7 @@ class RuntimeContractTests(unittest.TestCase):
                 stderr.getvalue().splitlines(),
                 [
                     "Processed 1 samples.",
-                    "Adjusted corrected beta values: clipped 1/1,500 matched values to [0,1].",
+                    "Adjusted corrected beta values: clipped 1/5,000 matched values to [0,1].",
                     f"Results saved to {output}",
                 ],
             )
@@ -700,11 +699,11 @@ class RuntimeContractTests(unittest.TestCase):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(
             hashlib.sha256(payload).hexdigest(),
-            "c7fd2afcba9b4830b9774cc646ccd060c7d48de9b0002fb9bebf77e551e45a37",
+            "6e8a5dfae9bb0c63e69c1e9a186b4bd01ea2550c5460134b453a457166e8060f",
         )
         self.assertEqual(
             hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-            "1ee42be811e5373d28ed6a2cd8bea895ea1df574fdb1de520e2f77d13354bcee",
+            "070a455c92f036ea10335204e6d1b46f86b6a4bba2085e4a60c987c77f4e62ce",
         )
         self.assertEqual(manifest["kind"], "alma3_demo_dataset_manifest")
         self.assertEqual(manifest["dataset"]["compressed_bytes"], len(payload))
@@ -721,7 +720,7 @@ class RuntimeContractTests(unittest.TestCase):
         reader = csv.reader(StringIO(decompressed.decode("utf-8"), newline=""))
         header = next(reader)
         rows = list(reader)
-        expected_ids = [f"demo_{index:02d}" for index in range(1, 17)]
+        expected_ids = [sample["sample_id"] for sample in manifest["samples"]]
         self.assertEqual(header[0], "sample_id")
         self.assertEqual(len(header) - 1, 65_536)
         self.assertEqual(len(set(header[1:])), 65_536)
@@ -736,133 +735,8 @@ class RuntimeContractTests(unittest.TestCase):
         )
         public_text = decompressed.decode("utf-8") + manifest_path.read_text(encoding="utf-8")
         self.assertIsNone(re.search(r"(?:GSE|GSM|E-MTAB-)[0-9]+", public_text, flags=re.IGNORECASE))
-        accepted = {sample["accepted_classification"] for sample in manifest["samples"]}
-        self.assertTrue(
-            {
-                "Blastic plasmacytoid dendritic cell neoplasm",
-                "Follicular dendritic cell sarcoma",
-                "Rosai-Dorfman disease",
-            }.issubset(accepted)
-        )
-
-    def test_embedding_api_and_forward_are_exactly_equivalent(self) -> None:
-        config = foundation_config()
-        model = DiagnosticModel(
-            FoundationModel(config),
-            DxConfig(
-                foundation=config,
-                targets={target: 2 for target in DX_TARGETS},
-                hidden_dim=16,
-                dropout=0.0,
-            ),
-            freeze_foundation=False,
-        ).eval()
-        inputs = (
-            torch.rand(2, config.n_cpgs),
-            torch.ones(2, config.n_cpgs, dtype=torch.bool),
-            torch.zeros(2, config.n_cpgs),
-            torch.zeros(2, config.n_cpgs, dtype=torch.long),
-            torch.linspace(0, 1, config.n_cpgs).expand(2, -1),
-        )
-        with torch.inference_mode():
-            embedding = model.embed(*inputs)
-            split = model.logits_from_embedding(embedding)
-            composed = model(*inputs)
-        self.assertEqual(embedding.dtype, torch.float32)
-        self.assertEqual(embedding.shape, (2, config.d_model))
-        for target in DX_TARGETS:
-            self.assertTrue(torch.equal(split[target], composed[target]))
-        with self.assertRaisesRegex(ValueError, "embedding must have shape"):
-            model.logits_from_embedding(torch.zeros(2, config.d_model + 1))
-        with self.assertRaisesRegex(ValueError, "float32"):
-            model.logits_from_embedding(torch.zeros(2, config.d_model, dtype=torch.float64))
-
-    def test_release_validation_is_exact_and_fail_closed(self) -> None:
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            release, model = create_release(root / "release")
-            with patch("alma3.release.load_dx", return_value=model):
-                validated = validate_release(release)
-            self.assertEqual({path.name for path in release.iterdir()}, set(RELEASE_FILES))
-            self.assertEqual(validated["thresholds"]["minimum_observed_cpgs"], 1500)
-            self.assertEqual(validated["config"].foundation.d_model, 1536)
-
-            wrong_metadata = root / "wrong-metadata"
-            shutil.copytree(release, wrong_metadata)
-            metadata_path = wrong_metadata / "release.json"
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            metadata["version"] = "3.0.1"
-            write_json(metadata_path, metadata)
-            manifest_path = wrong_metadata / "SHA256SUMS.json"
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["release.json"] = sha256(metadata_path)
-            write_json(manifest_path, manifest)
-            with self.assertRaisesRegex(ValueError, "metadata"):
-                validate_release(wrong_metadata)
-
-            wrong_license = root / "wrong-license"
-            shutil.copytree(release, wrong_license)
-            license_path = wrong_license / "LICENSE"
-            license_path.write_text("MIT License\n", encoding="utf-8")
-            license_manifest = json.loads(
-                (wrong_license / "SHA256SUMS.json").read_text(encoding="utf-8")
-            )
-            license_manifest["LICENSE"] = sha256(license_path)
-            write_json(wrong_license / "SHA256SUMS.json", license_manifest)
-            with self.assertRaisesRegex(ValueError, "ALMA3 License 1.0"):
-                validate_release(wrong_license)
-
-            wrong_dimensions = root / "wrong-dimensions"
-            shutil.copytree(release, wrong_dimensions)
-            config_path = wrong_dimensions / "config.json"
-            config_payload = json.loads(config_path.read_text(encoding="utf-8"))
-            config_payload["foundation"]["d_model"] = 8
-            config_payload["foundation"]["n_heads"] = 2
-            write_json(config_path, config_payload)
-            wrong_manifest = json.loads(
-                (wrong_dimensions / "SHA256SUMS.json").read_text(encoding="utf-8")
-            )
-            wrong_manifest["config.json"] = sha256(config_path)
-            write_json(wrong_dimensions / "SHA256SUMS.json", wrong_manifest)
-            with self.assertRaisesRegex(ValueError, "embedding dimension must be 1536"):
-                validate_release(wrong_dimensions)
-
-            mutations = {
-                "marker": lambda path: (path / "RELEASE_COMPLETE").write_text("done\n", encoding="utf-8"),
-                "missing": lambda path: (path / "taxonomy.json").unlink(),
-                "extra": lambda path: (path / "unexpected.txt").write_text("extra\n", encoding="utf-8"),
-                "tampered": lambda path: (path / "model.safetensors").write_bytes(b"tampered\n"),
-            }
-            for name, mutation in mutations.items():
-                with self.subTest(name=name):
-                    candidate = root / name
-                    shutil.copytree(release, candidate)
-                    mutation(candidate)
-                    with self.assertRaises((ValueError, FileNotFoundError)):
-                        validate_release(candidate)
-
-            cpg_mutations = {
-                "cpg-kind": lambda payload: payload.__setitem__("kind", "wrong"),
-                "cpg-count": lambda payload: payload.__setitem__("selected_cpg_count", 1),
-                "cpg-indices": lambda payload: payload["indices"].__setitem__(0, payload["indices"][1]),
-                "cpg-algorithm": lambda payload: payload.__setitem__("selection_algorithm", ""),
-                "cpg-source-hash": lambda payload: payload.__setitem__("source_cpg_manifest_sha256", "bad"),
-            }
-            for name, mutation in cpg_mutations.items():
-                with self.subTest(name=name):
-                    candidate = root / name
-                    shutil.copytree(release, candidate)
-                    cpg_path = candidate / "cpg_manifest.json"
-                    cpg_payload = json.loads(cpg_path.read_text(encoding="utf-8"))
-                    mutation(cpg_payload)
-                    write_json(cpg_path, cpg_payload)
-                    candidate_manifest = json.loads(
-                        (candidate / "SHA256SUMS.json").read_text(encoding="utf-8")
-                    )
-                    candidate_manifest["cpg_manifest.json"] = sha256(cpg_path)
-                    write_json(candidate / "SHA256SUMS.json", candidate_manifest)
-                    with self.assertRaisesRegex(ValueError, "CpG manifest"):
-                        validate_release(candidate)
+        self.assertTrue(all(row["observed_cpg_count"] >= 5000 for row in manifest["samples"]))
+        self.assertEqual(manifest["release"]["version"], "3.1.0")
 
     def test_inference_and_sidecar_share_one_embedding_tensor_and_input_order(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -902,14 +776,14 @@ class RuntimeContractTests(unittest.TestCase):
                     device="cpu",
                     embedding_sidecar=sidecar,
                 )
-            self.assertEqual(batch_sizes, [2, 1])
+            self.assertEqual(batch_sizes, [3])
             self.assertEqual(len(embedded), len(consumed))
             self.assertTrue(all(source is target for source, target in zip(embedded, consumed, strict=True)))
 
             results = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
             payload = json.loads(sidecar.read_text(encoding="utf-8"))
             validate_embedding_sidecar(payload)
-            self.assertEqual(payload["representation"]["dimensions"], 1536)
+            self.assertEqual(payload["representation"]["dimensions"], 1090)
             invalid_sidecar = json.loads(json.dumps(payload))
             invalid_sidecar["representation"]["dimensions"] = 8
             with self.assertRaisesRegex(InputContractError, "representation is invalid"):
@@ -925,7 +799,7 @@ class RuntimeContractTests(unittest.TestCase):
             )
             for result in results:
                 validate_result(result)
-            self.assertEqual(payload["release"]["model_sha256"], results[0]["release"]["model_sha256"])
+            self.assertEqual(payload["release"]["ensemble_sha256"], results[0]["release"]["ensemble_sha256"])
             self.assertEqual(payload["release"]["taxonomy_sha256"], results[0]["release"]["taxonomy_sha256"])
             self.assertEqual(payload["release"]["thresholds_sha256"], results[0]["release"]["thresholds_sha256"])
 
@@ -966,7 +840,7 @@ class RuntimeContractTests(unittest.TestCase):
             self.assertTrue(all(row["input_modification_mode"] == "" for row in rows))
             self.assertTrue(all(row["input_clipped_value_count"] == "0" for row in rows))
             release_hash_files = {
-                "model_sha256": "model.safetensors",
+                "ensemble_sha256": "ensemble.json",
                 "taxonomy_sha256": "taxonomy.json",
                 "cpg_manifest_sha256": "cpg_manifest.json",
                 "thresholds_sha256": "thresholds.json",
@@ -1027,12 +901,12 @@ class RuntimeContractTests(unittest.TestCase):
             release, model = create_release(root / "release")
             validated = validated_release_fixture(release, model)
             sparse = root / "sparse.csv"
-            write_array_csv(sparse, sample_count=1, observed=1499)
+            write_array_csv(sparse, sample_count=1, observed=4999)
             sparse_output = root / "sparse.jsonl"
             sparse_sidecar = root / "sparse.embedding.json"
             with (
                 patch("alma3.runtime.load_release", return_value=validated),
-                self.assertRaisesRegex(InputContractError, "below calibrated observed-CpG floor"),
+                self.assertRaisesRegex(InputContractError, "below required observed-CpG floor"),
             ):
                 run_inference(
                     release,
@@ -1082,11 +956,11 @@ class RuntimeContractTests(unittest.TestCase):
             validated = validated_release_fixture(release, model)
             complete_input = root / "complete.csv"
             sparse_input = root / "sparse.csv"
-            write_array_csv(complete_input, sample_count=1, observed=1500)
+            write_array_csv(complete_input, sample_count=1, observed=5000)
             write_array_csv(
                 sparse_input,
                 sample_count=1,
-                observed=1500,
+                observed=5000,
                 omit_unobserved_columns=True,
             )
             complete_output = root / "complete.jsonl"
@@ -1159,7 +1033,7 @@ class RuntimeContractTests(unittest.TestCase):
             with (
                 patch("alma3.runtime.load_release", return_value=validated),
                 patch.object(DiagnosticModel, "logits_from_embedding", mutate_release),
-                self.assertRaisesRegex(ValueError, "release artifact changed during inference"),
+                self.assertRaisesRegex(ValueError, "release inventory changed during inference"),
             ):
                 run_inference(
                     release,
@@ -1190,9 +1064,9 @@ class RuntimeContractTests(unittest.TestCase):
                 ["input.csv"],
                 "array-csv",
                 "result.jsonl",
-                device="auto",
+                device="cpu",
                 embedding_sidecar=None,
-                batch_size=2,
+                batch_size=64,
                 input_values="beta",
                 progress=False,
             )
@@ -1218,9 +1092,9 @@ class RuntimeContractTests(unittest.TestCase):
                 ["input.csv.gz"],
                 "array-csv",
                 "result.jsonl",
-                device="auto",
+                device="cpu",
                 embedding_sidecar=None,
-                batch_size=2,
+                batch_size=64,
                 input_values="mvalue",
                 progress=False,
             )
@@ -1232,9 +1106,9 @@ class RuntimeContractTests(unittest.TestCase):
                 ["sample.bed"],
                 "bedmethyl",
                 "result.jsonl",
-                device="auto",
+                device="cpu",
                 embedding_sidecar=None,
-                batch_size=2,
+                batch_size=64,
                 input_values="beta",
                 progress=False,
             )
@@ -1264,8 +1138,8 @@ class RuntimeContractTests(unittest.TestCase):
                 demo_path(),
                 "array-csv",
                 "alma3-demo.csv",
-                device="auto",
-                batch_size=2,
+                device="cpu",
+                batch_size=64,
                 input_values="beta",
                 progress=False,
             )

@@ -11,7 +11,6 @@ from safetensors.torch import load_file
 from torch import nn
 
 from .config import DxConfig
-from .model import FoundationModel
 from .sitewise import CANONICAL_BASE_SEED, CANONICAL_CONDITIONS, MINIMUM_RUNTIME_INPUT_CPGS
 
 DX_TARGETS = (
@@ -21,10 +20,10 @@ DX_TARGETS = (
     "type",
     "subtype",
 )
-DX_REPRESENTATION_NAME = "diagnostic_trunk_embedding"
+DX_REPRESENTATION_NAME = "final_ten_member_probabilities"
 DX_REPRESENTATION_VERSION = 1
 DX_REPRESENTATION_DTYPE = "float32"
-DX_REPRESENTATION_DIMENSIONS = 1536
+DX_REPRESENTATION_DIMENSIONS = 1090
 CALIBRATION_RULE = "fixed_1500_canonical_worst_condition_point_precision_source_bound_v5"
 THRESHOLDS_SCHEMA_VERSION = 9
 CALIBRATION_PRECISION_FLOOR = {
@@ -200,57 +199,129 @@ def load_taxonomy(path: str | Path) -> Taxonomy:
     return Taxonomy.from_dict(json.loads(Path(path).read_text()))
 
 
-class DiagnosticModel(nn.Module):
-    def __init__(self, foundation: FoundationModel, config: DxConfig, *, freeze_foundation: bool = True):
+class _DirectCpGBranch(nn.Module):
+    def __init__(self, n_cpgs, dropout, width=256):
         super().__init__()
-        self.foundation = foundation
-        self.config = config
-        if freeze_foundation:
-            for param in self.foundation.parameters():
-                param.requires_grad = False
-        d_model = config.foundation.d_model
-        self.trunk = nn.Sequential(
-            nn.LayerNorm(d_model),
-            nn.Linear(d_model, config.hidden_dim),
-            nn.GELU(),
-            nn.Dropout(config.dropout),
-            nn.Linear(config.hidden_dim, d_model),
-            nn.GELU(),
-        )
-        self.heads = nn.ModuleDict(
-            {_head_key(target): nn.Linear(d_model, config.targets[target]) for target in DX_TARGETS}
-        )
+        self.projection = nn.Linear(n_cpgs, width)
+        self.additive = False
+        self.neighbor = None
+        self.norm = nn.LayerNorm(width)
+        self.dropout = nn.Dropout(dropout)
+        nn.init.xavier_uniform_(self.projection.weight)
+        nn.init.zeros_(self.projection.bias)
 
-    def forward(
-        self,
-        beta: torch.Tensor,
-        observed: torch.Tensor,
-        uncertainty: torch.Tensor,
-        chr_id: torch.Tensor,
-        pos: torch.Tensor,
-    ) -> dict[str, torch.Tensor]:
-        return self.logits_from_embedding(self.embed(beta, observed, uncertainty, chr_id, pos))
+    def bind_reference(self, chromosome, position):
+        if self.neighbor is None:
+            raise ValueError('this encoder has no genomic-neighbor feature')
+        self.neighbor.bind_reference(chromosome, position)
 
-    def embed(
-        self,
-        beta: torch.Tensor,
-        observed: torch.Tensor,
-        uncertainty: torch.Tensor,
-        chr_id: torch.Tensor,
-        pos: torch.Tensor,
-    ) -> torch.Tensor:
-        """Return the versioned post-trunk representation consumed by every Dx head."""
-        return self.trunk(self.foundation.embed(beta, observed, uncertainty, chr_id, pos)).to(dtype=torch.float32)
+    def forward(self, beta, observed):
+        encoded = torch.where(observed, 2 * beta - 1, 0)
+        value = self.projection(encoded)
+        if self.neighbor is not None:
+            value = value + self.neighbor(beta, observed)
+        if self.additive:
+            return self.dropout(value)
+        normalized = self.norm(value.float() if value.dtype in (torch.float16, torch.bfloat16) else value)
+        return self.dropout(torch.nn.functional.gelu(normalized.to(value.dtype)))
 
-    def logits_from_embedding(self, embedding: torch.Tensor) -> dict[str, torch.Tensor]:
-        if embedding.ndim != 2 or embedding.shape[1] != self.config.foundation.d_model:
-            raise DxContractError(
-                "Dx embedding must have shape "
-                f"[batch, {self.config.foundation.d_model}], found {tuple(embedding.shape)}"
-            )
-        if embedding.dtype != torch.float32:
-            raise DxContractError("Dx embedding must use float32")
-        return {target: self.heads[_head_key(target)](embedding) for target in DX_TARGETS}
+
+class InputQualityChecks(nn.Module):
+    def forward(self, beta, observed, uncertainty):
+        return torch.stack((observed.any(dim=1).all(),
+            torch.where(observed, torch.isfinite(beta) & (beta >= 0) & (beta <= 1), True).all(),
+            torch.where(observed, torch.isfinite(uncertainty), True).all()))
+
+class DiagnosticModel(nn.Module):
+    def __init__(self, foundation, config, *, freeze_foundation=True):
+        super().__init__()
+        config.validate()
+        if foundation is not None:
+            raise DxContractError('3.1.0 requires direct CpG inputs')
+        self.foundation, self.config = None, config
+        from .direct_encoders import QualityTrunk, DirectDiagnosisEvidence
+        from .terminal import TerminalHead, ConditionalHeads, TypeSubtypeHead, CosineProjection
+        taxonomy = Taxonomy.from_dict(config.terminal_taxonomy)
+        self.trunk = QualityTrunk(nn.LayerNorm(256), nn.Linear(260, 384), nn.GELU(),
+                                 nn.Dropout(config.dropout), nn.Linear(384, 1024), nn.GELU())
+        self.heads = TerminalHead(1024, taxonomy)
+        self.direct_cpg = _DirectCpGBranch(config.input_cpg_count, config.dropout)
+        if config.direct_cpg_branch == 'quality256_linear_v1':
+            self.direct_cpg.additive = True
+            self.direct_cpg.norm = nn.Identity()
+            for index in (0, 2, 5):
+                self.trunk[index] = nn.Identity()
+        if config.refinement_mode is not None:
+            from .signature_refinement import SignatureRefinement
+            with torch.random.fork_rng(devices=[]):
+                self.refinement = SignatureRefinement(config.refinement_mode)
+        if config.output_mode in ('conditional_heads_v1', 'type_subtype_v1'):
+            with torch.random.fork_rng(devices=[]):
+                self.heads = ConditionalHeads(1024, taxonomy)
+        if config.output_mode == 'type_subtype_v1':
+            previous = self.heads
+            with torch.random.fork_rng(devices=[]):
+                self.heads = TypeSubtypeHead(1024, taxonomy)
+            with torch.no_grad():
+                subtype = previous[_head_key('subtype')]
+                types = previous[_head_key('type')]
+                presence = previous[_head_key(DX_TARGETS[0])]
+                self.heads.subtype_projection.load_state_dict(subtype.state_dict())
+                self.heads.type_projection.weight[1:].copy_(types.weight)
+                self.heads.type_projection.bias[1:].copy_(types.bias)
+                self.heads.type_projection.weight[0].copy_(types.bias.softmax(0) @ types.weight + presence.weight[0] - presence.weight[1])
+                self.heads.type_projection.bias[0].copy_(types.bias.logsumexp(0) + presence.bias[0] - presence.bias[1])
+        if config.terminal_geometry == 'cosine_v1':
+            names = ('type_projection', 'subtype_projection') if config.output_mode == 'type_subtype_v1' else ('projection',)
+            for name in names:
+                original = getattr(self.heads, name)
+                with torch.random.fork_rng(devices=[]):
+                    projection = CosineProjection(original.in_features, original.out_features)
+                with torch.no_grad():
+                    projection.weight.copy_(original.weight)
+                    projection.bias.copy_(original.bias)
+                setattr(self.heads, name, projection)
+        if config.direct_cpg_branch == 'quality256_neighbor_v1':
+            from .neighbor_evidence import NeighborEvidence
+            with torch.random.fork_rng(devices=[]):
+                self.direct_cpg.neighbor = NeighborEvidence(config.input_cpg_count)
+        self.input_checks = InputQualityChecks()
+        if config.direct_logit_correction is not None:
+            with torch.random.fork_rng(devices=[]):
+                self.direct_evidence = DirectDiagnosisEvidence(config.input_cpg_count, config.targets)
+
+    def forward(self, beta, observed, uncertainty, chr_id, pos, *, _return_embedding=False):
+        embedding = self.embed(beta, observed, uncertainty, chr_id, pos)
+        evidence = self.direct_evidence(beta, observed) if self.config.direct_logit_correction else None
+        logits = self.logits_from_embedding(embedding, _direct_evidence=evidence)
+        return (logits, embedding) if _return_embedding else logits
+
+    def embed(self, beta, observed, uncertainty, chr_id, pos):
+        from .direct_encoders import quality_summaries
+        if beta.ndim != 2 or beta.shape[1] != self.config.input_cpg_count:
+            raise DxContractError('direct CpG input width differs from the bound reference')
+        if any(value.shape != beta.shape for value in (observed, uncertainty, chr_id, pos)):
+            raise DxContractError('all inputs require matching [batch, CpG] shapes')
+        if (not all(value.is_floating_point() for value in (beta, uncertainty, pos))
+                or observed.dtype != torch.bool or chr_id.is_floating_point() or chr_id.dtype == torch.bool
+                or any(value.device != beta.device for value in (observed, uncertainty, chr_id, pos))):
+            raise DxContractError('input dtypes or devices violate the CpG contract')
+        nonempty, valid_beta, valid_uncertainty = self.input_checks(beta, observed, uncertainty).cpu().tolist()
+        if not nonempty or not valid_beta or not valid_uncertainty:
+            raise DxContractError('observed inputs require finite methylation in [0, 1], finite uncertainty and nonempty masks')
+        quality = quality_summaries(beta, observed, uncertainty)
+        value = self.direct_cpg(beta, observed)
+        if self.config.refinement_mode is not None:
+            value = self.refinement(value)
+        return self.trunk(value, quality).float()
+
+    def logits_from_embedding(self, embedding, *, _direct_evidence=None):
+        if embedding.ndim != 2 or embedding.shape[1] != 1024 or embedding.dtype != torch.float32:
+            raise DxContractError('Dx embedding must be float32 with shape [batch, 1024]')
+        if (self.config.direct_logit_correction is not None) != (_direct_evidence is not None):
+            raise DxContractError('direct diagnosis correction requires the original observed inputs')
+        logits = self.heads(embedding)
+        return logits if _direct_evidence is None else {k: v + _direct_evidence[k] for k, v in logits.items()}
 
 
 def _wilson_bounds(correct: int, total: int) -> tuple[float, float] | None:
@@ -553,7 +624,7 @@ def load_dx(path: str | Path, device: torch.device | str = "cpu") -> DiagnosticM
     if not weights_path.exists():
         raise FileNotFoundError(f"Dx weights missing: {weights_path}")
     config = DxConfig.from_dict(json.loads(config_path.read_text()))
-    foundation = FoundationModel(config.foundation)
+    foundation = None
     model = DiagnosticModel(foundation, config, freeze_foundation=False)
     model.load_state_dict(load_file(str(weights_path), device=str(device)))
     return model.to(device).eval()

@@ -11,7 +11,7 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md LICENSE requirements.txt ./
 RUN python -m pip install --no-cache-dir -r requirements.txt \
-    && python -m pip install --no-cache-dir --no-deps --index-url https://download.pytorch.org/whl/cpu "torch==2.7.0" \
+    && python -m pip install --no-cache-dir --no-deps --index-url https://download.pytorch.org/whl/cpu "torch==2.14.1" \
     && python -m pip check
 
 RUN python - <<'PY'
@@ -31,7 +31,9 @@ RUN python -m pip install --no-cache-dir --no-build-isolation --no-deps .
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/alma3-entrypoint
 
 ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    OMP_NUM_THREADS=8 \
+    MKL_NUM_THREADS=8
 
 RUN useradd -m -u 1000 almauser && chown -R almauser:almauser /app
 USER almauser

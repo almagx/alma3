@@ -1,15 +1,15 @@
 # Reproducible Docker build/runtime lock. Torch is installed without dependency
 # resolution from the PyTorch CPU wheel index after this file.
-filelock==3.29.0
-fsspec==2026.4.0
+filelock==3.32.3
+fsspec==2026.7.0
 Jinja2==3.1.6
 MarkupSafe==3.0.3
 mpmath==1.3.0
-networkx==3.4.2
+networkx==3.6.1
 numpy==1.26.4
 safetensors==0.8.0
-setuptools==80.10.2
+setuptools==78.1.0
 sympy==1.14.0
-typing_extensions==4.15.0
+typing_extensions==4.16.0
 wheel==0.47.0
-packaging==25.0
+packaging==26.3

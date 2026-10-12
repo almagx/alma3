@@ -9,16 +9,43 @@
     "schema_version",
     "version",
     "runtime_git_commit",
-    "source_release_manifest_sha256"
+    "source_release_manifest_sha256",
+    "ensemble_sha256",
+    "representation"
   ],
   "properties": {
-    "kind": {"const": "alma3_release"},
-    "schema_version": {"const": 1},
-    "version": {"const": "3.0.0"},
-    "runtime_git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-    "source_release_manifest_sha256": {"$ref": "#/$defs/sha256"}
+    "kind": {
+      "const": "alma3_release"
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "version": {
+      "const": "3.1.0"
+    },
+    "runtime_git_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "source_release_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "ensemble_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "representation": {
+      "const": {
+        "name": "final_ten_member_probabilities",
+        "version": 1,
+        "dtype": "float32",
+        "dimensions": 1090
+      }
+    }
   },
   "$defs": {
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
   }
 }

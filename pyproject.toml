@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alma3"
-version = "3.0.0"
-description = "ALMA3 foundation and diagnostic inference"
+version = "3.1.0"
+description = "ALMA3 methylation ensemble inference"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "ALMA Genomics" }]
 license = { file = "LICENSE" }
 dependencies = [
-  "torch==2.7.0",
+  "torch==2.14.1",
   "safetensors==0.8.0",
   "numpy==1.26.4",
 ]

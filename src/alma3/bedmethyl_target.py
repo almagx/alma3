@@ -13,12 +13,12 @@ from typing import Any
 from .hashes import publish_new_file, sha256_file, validate_new_external_outputs
 from .release import load_release, revalidate_release_identity
 
-TARGET_RESOURCE = "alma3-3.0.0-grch38-projectable-cpgs.bed.gz"
-TARGET_RELEASE_VERSION = "3.0.0"
-TARGET_CPG_MANIFEST_SHA256 = "404f4fa5eaf6bc26eea2231d83b0463430fbbfba31f5a6d11f698a2f9ca05935"
-TARGET_BED_GZIP_SHA256 = "c79f88affdb2848a85741d416b7b723b5c08077ee8948962114a666cfd23b7ac"
-TARGET_BED_SHA256 = "3e6feef17fc4813caf4186c63d63165e7ddb77a0c3b31c93a2a33ddf6eec916a"
-TARGET_CPG_COUNT = 65_535
+TARGET_RESOURCE = "alma3-3.1.0-grch38-projectable-cpgs.bed.gz"
+TARGET_RELEASE_VERSION = "3.1.0"
+TARGET_CPG_MANIFEST_SHA256 = 'f145bbfd3b0dddf4e837a0dc380cb4caccd03f541f4fc7dbf25a8a80e4be1753'
+TARGET_BED_GZIP_SHA256 = '9ac877b5917a7a7d6fcde52ae852718f99f14bbbe07f2b9c721a920cfc445c4f'
+TARGET_BED_SHA256 = '919bbf7d5d6b111c0cc7a6c5d829aec2d6f6fc2c72bed38bdaf26dcf50bbe283'
+TARGET_CPG_COUNT = 387847
 EXCLUDED_CPG_IDS = ("cg05280794",)
 _RECEIPT_KIND = "alma3_bedmethyl_target"
 _RECEIPT_SCHEMA_VERSION = 1
@@ -141,7 +141,7 @@ def _release_target_rows(root: Path) -> tuple[tuple[tuple[str, int, int], ...], 
         raise BedMethylTargetError("release CpG coordinates are invalid") from error
     if set(excluded) != set(EXCLUDED_CPG_IDS):
         raise BedMethylTargetError("release CpG manifest does not contain the required excluded probe")
-    return tuple(rows), excluded
+    return tuple(dict.fromkeys(rows)), excluded
 
 
 def _read_fai(path: Path) -> dict[str, tuple[int, int, int, int]]:
@@ -266,7 +266,7 @@ def export_bedmethyl_target(
         validated["release"]["version"] != TARGET_RELEASE_VERSION
         or validated["hashes"]["cpg_manifest.json"] != TARGET_CPG_MANIFEST_SHA256
     ):
-        raise BedMethylTargetError("release does not match the ALMA3 3.0.0 BedMethyl target")
+        raise BedMethylTargetError("release does not match the ALMA3 3.1.0 BedMethyl target")
     _, target_payload = _packaged_target()
     rows = _parse_bed3(target_payload, expected_count=TARGET_CPG_COUNT)
     release_rows, excluded = _release_target_rows(root)
@@ -314,7 +314,7 @@ def export_bedmethyl_target(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="alma3 export-bedmethyl-target",
-        description="Export and verify the ALMA3 3.0.0 GRCh38 Modkit target.",
+        description="Export and verify the ALMA3 3.1.0 GRCh38 Modkit target.",
     )
     parser.add_argument(
         "--artifact",

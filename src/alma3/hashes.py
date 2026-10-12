@@ -8,7 +8,7 @@ from pathlib import Path
 
 _RUNTIME_CONTRACT_REQUIRED_FILES = (
     "__init__.py",
-    "assets/alma3-3.0.0-grch38-projectable-cpgs.bed.gz",
+    "assets/alma3-3.1.0-grch38-projectable-cpgs.bed.gz",
     "schemas/dx_result.schema.json",
     "schemas/embedding_sidecar.schema.json",
     "schemas/release.schema.json",

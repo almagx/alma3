@@ -44,7 +44,7 @@ _BEDMETHYL_MODE_BY_CODE = {
 }
 DEFAULT_INFERENCE_BATCH_SIZE = DEFAULT_BATCH_SIZE
 EMBEDDING_SIDECAR_KIND = "alma3_embedding_sidecar"
-EMBEDDING_SIDECAR_SCHEMA_VERSION = 1
+EMBEDDING_SIDECAR_SCHEMA_VERSION = 2
 _RESULT_CSV_FIELDS = (
     "sample_id",
     "result_summary",
@@ -122,7 +122,7 @@ def validate_embedding_sidecar(payload: Any) -> None:
         raise InputContractError("embedding sidecar kind or schema version is invalid")
     release_fields = {
         "manifest_sha256",
-        "model_sha256",
+        "ensemble_sha256",
         "taxonomy_sha256",
         "cpg_manifest_sha256",
         "thresholds_sha256",
@@ -240,10 +240,10 @@ def _result_csv_row(result: dict[str, Any]) -> dict[str, Any]:
             differential[0]["model_score"] if differential else ""
         ),
         "differential_2_classification": (
-            differential[1]["classification"] if differential else ""
+            differential[1]["classification"] if len(differential) > 1 else ""
         ),
         "differential_2_model_score": (
-            differential[1]["model_score"] if differential else ""
+            differential[1]["model_score"] if len(differential) > 1 else ""
         ),
     }
     for level, prefix in (
@@ -576,7 +576,7 @@ def run_inference(
     input_format: str,
     output: str | Path,
     *,
-    device: str = "auto",
+    device: str = "cpu",
     embedding_sidecar: str | Path | None = None,
     batch_size: int = DEFAULT_INFERENCE_BATCH_SIZE,
     input_values: str = "beta",
@@ -788,7 +788,7 @@ def main(argv: list[str] | None = None) -> int:
         "--embedding-sidecar",
         help="optional new JSON file containing same-pass diagnostic embeddings",
     )
-    parser.add_argument("--device", default="auto", help="inference device: auto, cpu, cuda, or cuda:<index>")
+    parser.add_argument("--device", default="cpu", help="inference device: auto, cpu, cuda, or cuda:<index>")
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -829,7 +829,7 @@ def demo_main(argv: list[str] | None = None) -> int:
         help="release directory; otherwise use ALMA3_RELEASE",
     )
     parser.add_argument("-o", "--output", default="alma3-demo.csv", help="new demo CSV or JSONL output file")
-    parser.add_argument("--device", default="auto", help="inference device: auto, cpu, cuda, or cuda:<index>")
+    parser.add_argument("--device", default="cpu", help="inference device: auto, cpu, cuda, or cuda:<index>")
     args = parser.parse_args(argv)
     progress = sys.stderr.isatty()
     if progress:

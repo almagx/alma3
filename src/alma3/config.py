@@ -138,51 +138,71 @@ class FoundationConfig:
 
 @dataclass(frozen=True)
 class DxConfig:
-    foundation: FoundationConfig
+    foundation: FoundationConfig | None
     targets: dict[str, int]
-    hidden_dim: int = 2048
+    hidden_dim: int = 384
     dropout: float = 0.1
+    direct_cpg_branch: str = 'quality256_v1'
+    n_cpgs: int = 387849
+    output_mode: str = 'joint_terminal_v1'
+    terminal_taxonomy: dict[str, Any] | None = None
+    refinement_mode: str | None = None
+    terminal_geometry: str | None = None
+    direct_logit_correction: str | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> DxConfig:
         unknown = sorted(set(raw) - set(cls.__dataclass_fields__))
         if unknown:
             raise ConfigError(f"unknown Dx config field(s): {', '.join(unknown)}")
-        foundation = raw.get("foundation")
-        targets = raw.get("targets")
-        if not isinstance(foundation, dict):
-            raise ConfigError("Dx config requires foundation object")
-        if not isinstance(targets, dict):
-            raise ConfigError("Dx config requires targets object")
-        config = cls(
-            foundation=FoundationConfig.from_dict(foundation),
-            targets=dict(targets),
-            hidden_dim=raw.get("hidden_dim", 2048),
-            dropout=raw.get("dropout", 0.1),
-        )
+        config = cls(**raw)
         config.validate()
         return config
 
     def validate(self) -> None:
-        required = {
-            "hematolymphoid_tumor_presence",
-            "lineage",
-            "family",
-            "type",
-            "subtype",
-        }
-        if set(self.targets) != required:
-            missing = sorted(required - set(self.targets))
-            extra = sorted(set(self.targets) - required)
-            raise ConfigError(f"Dx targets must match exactly; missing={missing}, extra={extra}")
-        invalid = [name for name, size in self.targets.items() if type(size) is not int or size < 1]
-        if invalid:
-            raise ConfigError(f"Dx target sizes must be positive integers: {', '.join(sorted(invalid))}")
-        if type(self.hidden_dim) is not int or self.hidden_dim < 1:
-            raise ConfigError("hidden_dim must be positive")
-        _require_probability(self.dropout, "dropout")
+        from .terminal import terminal_paths
+        from .dx import Taxonomy
+        if (self.foundation is not None or self.hidden_dim != 384 or self.n_cpgs != 387849
+                or self.direct_cpg_branch not in ('quality256_v1', 'quality256_linear_v1', 'quality256_neighbor_v1')
+                or self.output_mode not in ('joint_terminal_v1', 'conditional_heads_v1', 'type_subtype_v1')
+                or self.refinement_mode not in (None, 'feature_attention2_v1')
+                or self.terminal_geometry not in (None, 'cosine_v1')
+                or self.direct_logit_correction not in (None, 'cpg_linear_v1')):
+            raise ConfigError('unsupported ALMA3 3.1.0 diagnostic architecture')
+        if self.direct_cpg_branch == 'quality256_linear_v1' and self.refinement_mode is not None:
+            raise ConfigError('additive encoding requires no attention')
+        if self.direct_cpg_branch == 'quality256_neighbor_v1' and (
+                self.refinement_mode != 'feature_attention2_v1' or self.output_mode != 'conditional_heads_v1'):
+            raise ConfigError('neighbor evidence requires conditional feature attention')
+        if self.direct_logit_correction and (self.direct_cpg_branch != 'quality256_v1'
+                or self.output_mode != 'conditional_heads_v1' or self.refinement_mode != 'feature_attention2_v1'):
+            raise ConfigError('direct correction requires conditional feature attention')
+        if self.terminal_geometry and self.output_mode == 'conditional_heads_v1':
+            raise ConfigError('cosine geometry requires terminal or type/subtype heads')
+        _require_probability(self.dropout, 'dropout')
+        taxonomy = Taxonomy.from_dict(self.terminal_taxonomy)
+        taxonomy.validate_sizes(self.targets)
+        if len(terminal_paths(taxonomy)) != 109:
+            raise ConfigError('3.1.0 requires 109 ordered terminal diagnoses')
+
+    @property
+    def input_cpg_count(self) -> int:
+        return self.n_cpgs
+
+    @property
+    def embedding_dim(self) -> int:
+        return 1024
+
+    @property
+    def has_branch_ablations(self) -> bool:
+        return False
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
-        payload["foundation"] = self.foundation.to_dict()
+        if self.refinement_mode is None:
+            del payload['refinement_mode']
+        if self.terminal_geometry is None:
+            del payload['terminal_geometry']
+        if self.direct_logit_correction is None:
+            del payload['direct_logit_correction']
         return payload

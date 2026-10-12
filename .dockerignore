@@ -13,5 +13,8 @@
 !src/alma3/py.typed
 !src/alma3/examples/
 !src/alma3/examples/*.csv.gz
+!src/alma3/examples/*.json
+!src/alma3/assets/
+!src/alma3/assets/*.bed.gz
 !src/alma3/schemas/
 !src/alma3/schemas/*.json

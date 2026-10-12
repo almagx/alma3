@@ -112,8 +112,8 @@ class BedMethylTargetTests(unittest.TestCase):
             output = root / "target.bed"
             validated = {
                 "root": release,
-                "release": {"version": "3.0.0"},
-                "hashes": {"cpg_manifest.json": "404f4fa5eaf6bc26eea2231d83b0463430fbbfba31f5a6d11f698a2f9ca05935"},
+                "release": {"version": "3.1.0"},
+                "hashes": {"cpg_manifest.json": "f145bbfd3b0dddf4e837a0dc380cb4caccd03f541f4fc7dbf25a8a80e4be1753"},
                 "manifest_sha256": "a" * 64,
             }
             with (
@@ -142,7 +142,7 @@ class BedMethylTargetTests(unittest.TestCase):
             reference = _small_reference(root)
             validated = {
                 "root": release,
-                "release": {"version": "3.0.0"},
+                "release": {"version": "3.1.0"},
                 "hashes": {"cpg_manifest.json": "0" * 64},
                 "manifest_sha256": "a" * 64,
             }
@@ -154,7 +154,7 @@ class BedMethylTargetTests(unittest.TestCase):
     def test_load_release_can_skip_model_loading(self) -> None:
         with patch("alma3.release.validate_release", return_value={}) as validate:
             load_release("release", load_model=False)
-        validate.assert_called_once_with(Path("release"), device="cpu", load_model=False)
+        validate.assert_called_once_with("release", device="cpu", load_model=False)
 
     def test_cli_passes_explicit_paths_to_exporter(self) -> None:
         with patch("alma3.bedmethyl_target.export_bedmethyl_target", return_value={}) as export:

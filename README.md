@@ -4,7 +4,7 @@
     <img src="assets/alma3-a3-signal-monogram-light.svg" alt="ALMA3 A3 symbol" width="96" height="96">
   </picture>
   <h1>ALMA3</h1>
-  <p><strong>Epigenomic foundation and diagnostic models for hematolymphoid tumors</strong></p>
+  <p><strong>Methylation ensemble for hematolymphoid tumors</strong></p>
   <p>
     <img alt="Research Use Only" src="https://img.shields.io/badge/Regulatory%20status-Research%20Use%20Only-orange">
   </p>
@@ -12,18 +12,18 @@
 
 ## Model introduction
 
-ALMA3 is an epigenomic foundation model. ALMA3-Dx uses its learned representation to classify hematolymphoid tumors, reporting the deepest supported conclusion from tumor presence through subtype.
+ALMA3 3.1.0 combines nine neural classifiers and one CpG-template classifier. It selects a disease type, then its subtype, using the frozen ensemble probabilities. The selected subtype is issued at a joint probability of at least 0.3295999742967636; positive cases below this cutoff are reported as subtype unresolved.
 
 ### Key features
 
-- **Billion-parameter methylation transformer:** 1,044,514,206 parameters, 36 transformer layers, 24 attention heads, and a 1,536-dimensional representation across 65,536 curated CpGs.
-- **Large-scale diagnostic training:** fine-tuned with 97,374 supervised training samples.
-- **Deep diagnostic hierarchy:** 2 tumor-presence classifications, 5 lineages, 14 families, 34 types, and 102 subtypes.
+- **Frozen ten-member ensemble:** 387,849 ordered CpG features and 109 terminal outcomes.
+- **Diagnostic hierarchy:** tumor presence, 5 lineages, 15 families, 35 types and 107 subtypes.
+- **CPU inference:** padded 64-row computation and 1,090 same-pass probability features for the selected tumor map.
 
 ## Quick start
 
 ```bash
-export ALMA3_IMAGE=ghcr.io/almagx/alma3:3.0.0
+export ALMA3_IMAGE=ghcr.io/almagx/alma3:3.1.0
 docker pull "$ALMA3_IMAGE"
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" demo
@@ -43,7 +43,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   infer -i sample.bed -o sample.alma3.csv
 ```
 
-The image includes the model and runs on an x86-64 CPU with at least 16 GB RAM.
+The image includes the model and runs on an x86-64 CPU with at least 16 GB RAM. Use eight CPU threads for the qualified execution policy.
 
 ## Point-and-click automatic analysis
 
@@ -59,7 +59,7 @@ The image includes the model and runs on an x86-64 CPU with at least 16 GB RAM.
 
 - In array CSVs, CpG headers should look like `cg00000029`, not gene names. Supply beta values as decimals near `0` to `1`. Mild corrected excursions are accepted. Use `--input-values mvalue` for M-values. Leave missing measurements blank or `NaN`; do not replace them with zero or transpose the matrix.
 - Raw IDAT files must first be processed with <a href="https://github.com/zwdzwd/sesame">SeSAMe</a> or submitted through <a href="https://app.almagx.com/">ALMAGX</a>.
-- Each sample must contain at least 1,500 recognized ALMA3 CpGs. Sample IDs must be nonempty and unique, with no surrounding whitespace or leading `=`, `+`, `-`, or `@`.
+- Each sample must contain at least 5,000 recognized ALMA3 CpGs. Sample IDs must be nonempty and unique, with no surrounding whitespace or leading `=`, `+`, `-`, or `@`.
 
 </details>
 
@@ -72,7 +72,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD:/work" "$ALMA3_IMAGE" \
   export-bedmethyl-target \
     --reference /work/GRCh38.fa \
-    --output /work/alma3-3.0.0-grch38-cpgs.bed
+    --output /work/alma3-3.1.0-grch38-cpgs.bed
 
 docker run --rm \
   --user "$(id -u):$(id -g)" \
@@ -84,7 +84,7 @@ docker run --rm \
     --cpg \
     --combine-strands \
     --no-filtering \
-    --include-bed /work/alma3-3.0.0-grch38-cpgs.bed \
+    --include-bed /work/alma3-3.1.0-grch38-cpgs.bed \
     --ref /work/GRCh38.fa
 
 docker run --rm --user "$(id -u):$(id -g)" \
@@ -92,7 +92,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   infer -i sample.bed -o sample.alma3.csv
 ```
 
-The exporter verifies GRCh38 and writes the 65,535 release CpGs plus a receipt. This Modkit command produces combined 5mC+5hmC input, which ALMA3 detects automatically. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
+The exporter verifies GRCh38 and writes the 387,847 distinct projectable genomic positions (one shared probe position and one non-CpG probe excluded from the target) plus a receipt. This Modkit command produces combined 5mC+5hmC input, which ALMA3 detects automatically. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
 </details>
 
@@ -117,7 +117,7 @@ docker run --rm \
     --min-mapq 1
 
 gzip -cd sample.combined.bed.gz | \
-awk -v target_file="alma3-3.0.0-grch38-cpgs.bed" '
+awk -v target_file="alma3-3.1.0-grch38-cpgs.bed" '
   BEGIN {
     FS = OFS = "\t"
     while ((getline < target_file) > 0) keep[$1 SUBSEP $2] = 1
@@ -152,7 +152,7 @@ CSV is easiest to read and share; JSONL provides the same result in a structured
 
 <details><summary><strong>Citation</strong></summary>
 
-ALMA Genomics Inc. (2026). ALMA3 (Version 3.0.0) [Computer software]. https://github.com/almagx/alma3
+ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.0) [Computer software]. https://github.com/almagx/alma3
 
 Manuscript in preparation.
 

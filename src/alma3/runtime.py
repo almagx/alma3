@@ -10,16 +10,16 @@ from typing import Any, NamedTuple
 import torch
 
 from . import __version__
-from .clinical_result import results_from_logits, validate_sample_id
+from .clinical_result import results_from_probabilities, validate_sample_id
 from .hashes import runtime_contract_sha256
 from .release import load_release
 from .sitewise import real_coverage_presentation
 
-DEFAULT_BATCH_SIZE = 2
+DEFAULT_BATCH_SIZE = 64
 MINIMUM_CUDA_TOTAL_MEMORY_BYTES = 16 * 1024**3
 MINIMUM_CUDA_AVAILABLE_MEMORY_BYTES = 14 * 1024**3
 CPU_TORCH_INSTALL_COMMAND = (
-    "python -m pip install --force-reinstall torch==2.7.0 "
+    "python -m pip install --force-reinstall torch==2.14.1 "
     "--index-url https://download.pytorch.org/whl/cpu"
 )
 
@@ -174,7 +174,7 @@ def _align_array_batch(
 class ALMA3:
     """Load one ALMA3-Dx release and reuse it for one or many samples."""
 
-    def __init__(self, artifact: str | Path | None = None, *, device: str = "auto") -> None:
+    def __init__(self, artifact: str | Path | None = None, *, device: str = "cpu") -> None:
         """Load an explicit release or the release configured by ALMA3_RELEASE."""
 
         self.device = resolve_device(device)
@@ -192,7 +192,7 @@ class ALMA3:
         self.release_identity = {
             "version": validated["release"]["version"],
             "manifest_sha256": validated["manifest_sha256"],
-            "model_sha256": hashes["model.safetensors"],
+            "ensemble_sha256": hashes["ensemble.json"],
             "taxonomy_sha256": hashes["taxonomy.json"],
             "cpg_manifest_sha256": hashes["cpg_manifest.json"],
             "thresholds_sha256": hashes["thresholds.json"],
@@ -204,7 +204,7 @@ class ALMA3:
         }
         self.sidecar_release_identity = {
             "manifest_sha256": validated["manifest_sha256"],
-            "model_sha256": hashes["model.safetensors"],
+            "ensemble_sha256": hashes["ensemble.json"],
             "taxonomy_sha256": hashes["taxonomy.json"],
             "cpg_manifest_sha256": hashes["cpg_manifest.json"],
             "thresholds_sha256": hashes["thresholds.json"],
@@ -246,22 +246,24 @@ class ALMA3:
             from .infer import InputContractError
 
             raise InputContractError(
-                "inference sample below calibrated observed-CpG floor "
+                "inference sample below required observed-CpG floor "
                 f"{self.minimum_observed_cpgs}: {too_sparse[:5]}"
             )
         with torch.inference_mode():
             observed_device = observed.to(self.device)
-            embedding = self.model.embed(
-                beta.to(self.device),
-                observed_device,
-                uncertainty.to(self.device),
-                self._chr_id.expand(beta.shape[0], -1),
-                self._pos.expand(beta.shape[0], -1),
-            )
-            logits = self.model.logits_from_embedding(embedding)
-            results = results_from_logits(
+            pieces, features = [], []
+            for start in range(0, len(ids), 64):
+                stop = min(start + 64, len(ids))
+                logp, values = self.model.predict_with_map_features(
+                    beta[start:stop].to(self.device), observed_device[start:stop],
+                    uncertainty[start:stop].to(self.device),
+                    self._chr_id.expand(stop - start, -1), self._pos.expand(stop - start, -1))
+                pieces.append(logp.exp())
+                features.append(values)
+            probability, embedding = torch.cat(pieces), torch.cat(features)
+            results = results_from_probabilities(
                 ids,
-                logits,
+                probability,
                 self.thresholds,
                 self.taxonomy,
                 self.release_identity,

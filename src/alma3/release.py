@@ -1,320 +1,209 @@
+"""Strict inference-only release contract for ALMA3 3.1.0."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import os
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
-
-import torch
 
 from .config import DxConfig
 from .data import CpGManifest
-from .dx import (
-    DX_REPRESENTATION_DIMENSIONS,
-    DX_TARGETS,
-    DxContractError,
-    load_dx,
-    load_taxonomy,
-    load_thresholds,
-)
-from .hashes import sha256_file, verify_sha256_manifest
-from .model import validate_chromosome_layout
+from .dx import DX_TARGETS, DxContractError, Taxonomy, load_taxonomy
+from .hashes import sha256_file
+from .terminal import SUBTYPE_CUTOFF, terminal_paths
 
-RELEASE_PAYLOADS = frozenset(
-    {
-        "release.json",
-        "config.json",
-        "model.safetensors",
-        "taxonomy.json",
-        "cpg_manifest.json",
-        "thresholds.json",
-        "LICENSE",
-    }
-)
-RELEASE_FILES = RELEASE_PAYLOADS | {"SHA256SUMS.json", "RELEASE_COMPLETE"}
 RELEASE_KIND = "alma3_release"
-RELEASE_SCHEMA_VERSION = 1
-RELEASE_VERSION = "3.0.0"
+RELEASE_VERSION = "3.1.0"
+RELEASE_SCHEMA_VERSION = 2
 RELEASE_ENV = "ALMA3_RELEASE"
 RELEASE_LICENSE_HEADER = "ALMA3 LICENSE 1.0\n"
-RELEASE_METADATA_FIELDS = frozenset(
-    {
-        "kind",
-        "schema_version",
-        "version",
-        "runtime_git_commit",
-        "source_release_manifest_sha256",
-    }
+SELECTED_ENSEMBLE_SHA256 = "f611e107f38ee42d64f43dc0049d165061badbfad34596736f0c86cdaeff9f79"
+RELEASE_PAYLOADS = frozenset(
+    {"release.json", "ensemble.json", "taxonomy.json", "cpg_manifest.json", "thresholds.json", "LICENSE"}
 )
-CPG_MANIFEST_SCHEMA_VERSION = 1
-CPG_MANIFEST_REQUIRED_FIELDS = frozenset(
-    {
-        "kind",
-        "schema_version",
-        "bundle_fingerprint",
-        "cpg_manifest_sha256",
-        "source_cpg_manifest_sha256",
-        "selected_cpg_count",
-        "selection_algorithm",
-        "cpg_ids",
-        "indices",
-        "pos",
-        "chrom",
-        "start",
-        "end",
-    }
-)
-CPG_MANIFEST_OPTIONAL_FIELDS = frozenset({"chr_id"})
+RELEASE_FILES = RELEASE_PAYLOADS | {"SHA256SUMS.json", "RELEASE_COMPLETE"}
 
 
-def _is_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and value == value.lower()
-        and all(character in "0123456789abcdef" for character in value)
-    )
+def _is_sha256(value):
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
 
 
-def _is_revision(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 40
-        and value == value.lower()
-        and all(character in "0123456789abcdef" for character in value)
-    )
+def _is_revision(value):
+    return isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdef" for c in value)
 
 
-def _read_object(path: Path, description: str) -> dict[str, Any]:
+def _read_object(path, description):
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError) as error:
         raise DxContractError(f"invalid {description}: {path}") from error
-    if not isinstance(payload, dict):
-        raise DxContractError(f"{description} must be a JSON object: {path}")
-    return payload
+    if not isinstance(value, dict):
+        raise DxContractError(f"{description} must be an object")
+    return value
 
 
-def _artifact_files(root: Path) -> set[str]:
+def _artifact_files(root):
     if not root.is_dir() or root.is_symlink():
-        raise DxContractError(f"release artifact must be a real directory: {root}")
+        raise DxContractError("release must be a real directory")
     paths = list(root.rglob("*"))
-    if any(path.is_symlink() for path in paths):
-        raise DxContractError(f"release artifact must not contain symbolic links: {root}")
-    if any(path.is_dir() for path in paths):
-        raise DxContractError(f"release artifact must not contain directories: {root}")
-    return {path.relative_to(root).as_posix() for path in paths if path.is_file()}
+    if any(p.is_symlink() for p in paths):
+        raise DxContractError("release contains a symbolic link")
+    return {p.relative_to(root).as_posix() for p in paths if p.is_file()}
 
 
-def _validate_cpg_release_contract(payload: dict[str, Any], cpg: CpGManifest, config: DxConfig) -> None:
-    fields = set(payload)
-    if not CPG_MANIFEST_REQUIRED_FIELDS.issubset(fields) or not fields.issubset(
-        CPG_MANIFEST_REQUIRED_FIELDS | CPG_MANIFEST_OPTIONAL_FIELDS
-    ):
-        raise DxContractError("release CpG manifest fields are invalid")
-    row_count = len(cpg.cpg_ids)
-    indices = payload.get("indices")
-    selection_algorithm = payload.get("selection_algorithm")
+def ensemble_asset_paths(manifest):
+    """Derive the complete public asset inventory, without research directories."""
     if (
-        payload.get("kind") != "alma3_cpg_manifest"
-        or payload.get("schema_version") != CPG_MANIFEST_SCHEMA_VERSION
-        or not _is_sha256(payload.get("bundle_fingerprint"))
-        or not _is_sha256(payload.get("cpg_manifest_sha256"))
-        or not _is_sha256(payload.get("source_cpg_manifest_sha256"))
-        or payload.get("selected_cpg_count") != row_count
-        or config.foundation.n_cpgs != row_count
-        or not isinstance(selection_algorithm, str)
-        or not selection_algorithm
-        or not isinstance(indices, list)
-        or len(indices) != row_count
-        or any(type(index) is not int for index in indices)
-        or any(index < 0 for index in indices)
-        or len(set(indices)) != row_count
-        or cpg.chrom is None
-        or cpg.start is None
-        or cpg.arm_id is None
+        manifest.get("kind") != "alma3_final_ten_v1"
+        or manifest.get("decision_rule") != "type_first_v1"
+        or len(manifest.get("members", [])) != 10
     ):
-        raise DxContractError("release CpG manifest contract is invalid")
+        raise DxContractError("unsupported ensemble contract")
+    assets = {"ensemble.json", "taxonomy.json", "cpg_manifest.json"}
+    for member in manifest["members"]:
+        if member["kind"] == "sparse_templates":
+            assets.add(member["templates"])
+        else:
+            assets.update(str(Path(member["export"]) / name) for name in ("config.json", "model.safetensors"))
+        for name in ("residual", "partition"):
+            if name in member:
+                assets.add(member[name])
+    for relative in assets:
+        p = Path(relative)
+        if p.is_absolute() or ".." in p.parts or p.as_posix() != relative:
+            raise DxContractError("asset path must remain inside the release")
+    return assets
 
 
-def revalidate_release_identity(
-    artifact: str | Path,
-    *,
-    manifest_sha256: str,
-    hashes: Mapping[str, str],
-) -> None:
+def validate_reporting_policy(value, *, ensemble_sha256, taxonomy_sha256):
+    expected = dict(
+        kind="alma3_ensemble_reporting",
+        schema_version=1,
+        minimum_observed_cpgs=5000,
+        decision_rule="type_first_v1",
+        policy="fixed_subtype_only_v1",
+        ensemble_sha256=ensemble_sha256,
+        taxonomy_sha256=taxonomy_sha256,
+        thresholds={key: SUBTYPE_CUTOFF if key == "subtype" else 0.0 for key in DX_TARGETS},
+    )
+    if value != expected:
+        raise DxContractError("reporting requires the frozen subtype-only cutoff and ensemble binding")
+    return value
+
+
+def revalidate_release_identity(artifact, *, manifest_sha256, hashes):
     root = Path(artifact).resolve()
-    if _artifact_files(root) != RELEASE_FILES:
-        raise DxContractError("release artifact changed during inference")
-    if (root / "RELEASE_COMPLETE").read_bytes() != b"complete\n":
-        raise DxContractError("release artifact changed during inference")
-    if sha256_file(root / "SHA256SUMS.json") != manifest_sha256:
-        raise DxContractError("release manifest changed during inference")
-    if verify_sha256_manifest(root, required=RELEASE_PAYLOADS) != dict(hashes):
-        raise DxContractError("release payloads changed during inference")
+    if (
+        _artifact_files(root) != set(hashes) | {"SHA256SUMS.json", "RELEASE_COMPLETE"}
+        or (root / "RELEASE_COMPLETE").read_bytes() != b"complete\n"
+        or sha256_file(root / "SHA256SUMS.json") != manifest_sha256
+    ):
+        raise DxContractError("release inventory changed during inference")
+    for relative, expected in hashes.items():
+        if sha256_file(root / relative) != expected:
+            raise DxContractError(f"release changed during inference: {relative}")
 
 
-def validate_release(
-    artifact: str | Path,
-    *,
-    device: torch.device | str = "cpu",
-    load_model: bool = True,
-) -> dict[str, Any]:
-    artifact_path = Path(artifact)
-    if artifact_path.is_symlink():
-        raise DxContractError(f"release artifact must not be a symbolic link: {artifact_path}")
-    root = artifact_path.resolve()
+def validate_release(artifact=None, *, verify_hashes=True, device="cpu", load_model=False):
+    location = artifact or os.environ.get(RELEASE_ENV)
+    if not location:
+        raise DxContractError("provide a release directory or set ALMA3_RELEASE")
+    root = Path(location).resolve()
     files = _artifact_files(root)
-    if files != RELEASE_FILES:
-        missing = sorted(RELEASE_FILES - files)
-        extra = sorted(files - RELEASE_FILES)
-        raise DxContractError(f"release artifact file set is invalid; missing={missing}, extra={extra}")
+    manifest = _read_object(root / "ensemble.json", "ensemble")
+    expected = ensemble_asset_paths(manifest) | RELEASE_FILES
+    if files != expected:
+        raise DxContractError(
+            f"invalid inference payload inventory: missing={sorted(expected - files)}, extra={sorted(files - expected)}"
+        )
     if (root / "RELEASE_COMPLETE").read_bytes() != b"complete\n":
-        raise DxContractError(f"release is incomplete: {root / 'RELEASE_COMPLETE'}")
-    hashes = verify_sha256_manifest(root, required=RELEASE_PAYLOADS)
-    if set(hashes) != RELEASE_PAYLOADS:
-        raise DxContractError("release SHA256 manifest entries are invalid")
-
-    release_metadata = _read_object(root / "release.json", "release metadata")
+        raise DxContractError("release publication is incomplete")
+    hashes = _read_object(root / "SHA256SUMS.json", "checksums")
+    if set(hashes) != expected - {"SHA256SUMS.json", "RELEASE_COMPLETE"} or not all(
+        _is_sha256(v) for v in hashes.values()
+    ):
+        raise DxContractError("checksum inventory differs from inference assets")
+    if verify_hashes:
+        for relative, expected_hash in hashes.items():
+            if sha256_file(root / relative) != expected_hash:
+                raise DxContractError(f"release checksum mismatch: {relative}")
+    if hashes["ensemble.json"] != SELECTED_ENSEMBLE_SHA256:
+        raise DxContractError("3.1.0 requires the selected Final-ten ensemble")
+    release = _read_object(root / "release.json", "release metadata")
     if (
-        set(release_metadata) != RELEASE_METADATA_FIELDS
-        or release_metadata.get("kind") != RELEASE_KIND
-        or release_metadata.get("schema_version") != RELEASE_SCHEMA_VERSION
-        or release_metadata.get("version") != RELEASE_VERSION
-        or not _is_revision(release_metadata.get("runtime_git_commit"))
-        or not _is_sha256(release_metadata.get("source_release_manifest_sha256"))
+        release.get("kind") != RELEASE_KIND
+        or release.get("schema_version") != RELEASE_SCHEMA_VERSION
+        or release.get("version") != RELEASE_VERSION
+        or not _is_revision(release.get("runtime_git_commit"))
+        or release.get("ensemble_sha256") != hashes["ensemble.json"]
+        or release.get("representation")
+        != dict(name="final_ten_member_probabilities", version=1, dtype="float32", dimensions=1090)
     ):
-        raise DxContractError("release metadata contract is invalid")
-    try:
-        license_text = (root / "LICENSE").read_text(encoding="utf-8")
-    except OSError as error:
-        raise DxContractError("release license is unreadable") from error
-    if not license_text.startswith(RELEASE_LICENSE_HEADER):
-        raise DxContractError("release license must be ALMA3 License 1.0")
-
-    config_payload = _read_object(root / "config.json", "release model config")
-    if set(config_payload) != {"foundation", "targets", "hidden_dim", "dropout"}:
-        raise DxContractError("release model config fields are invalid")
-    config = DxConfig.from_dict(config_payload)
-    if config.foundation.d_model != DX_REPRESENTATION_DIMENSIONS:
-        raise DxContractError(
-            f"released diagnostic embedding dimension must be {DX_REPRESENTATION_DIMENSIONS}"
-        )
-
-    taxonomy_payload = _read_object(root / "taxonomy.json", "release taxonomy")
-    if set(taxonomy_payload) != {
-        "kind",
-        "schema_version",
-        "generated_at",
-        "bundle_fingerprint",
-        "levels",
-        "family_by_lineage",
-        "type_by_family",
-        "subtype_by_type",
-    } or (
-        taxonomy_payload["schema_version"] != 1
-        or not isinstance(taxonomy_payload["generated_at"], str)
-        or not taxonomy_payload["generated_at"]
-        or not _is_sha256(taxonomy_payload["bundle_fingerprint"])
-    ):
-        raise DxContractError("release taxonomy fields are invalid")
-    levels = taxonomy_payload.get("levels")
-    if not isinstance(levels, dict) or set(levels) != set(DX_TARGETS):
-        raise DxContractError("release taxonomy levels are invalid")
-    taxonomy = load_taxonomy(root / "taxonomy.json")
-    taxonomy.validate_sizes(config.targets)
-    if taxonomy.classes["hematolymphoid_tumor_presence"] != ("absent", "present"):
-        raise DxContractError("release tumor-presence taxonomy must be exactly absent, present")
-
-    cpg_payload = _read_object(root / "cpg_manifest.json", "release CpG manifest")
+        raise DxContractError("unsupported release metadata")
+    if not (root / "LICENSE").read_text().startswith(RELEASE_LICENSE_HEADER):
+        raise DxContractError("release license is missing")
     cpg = CpGManifest.load(root / "cpg_manifest.json")
-    _validate_cpg_release_contract(cpg_payload, cpg, config)
-    validate_chromosome_layout(config.foundation, cpg.chr_id, cpg.arm_id)
-
-    thresholds = load_thresholds(root / "thresholds.json")
-    expected_threshold_bindings = {
-        "model_sha256": hashes["model.safetensors"],
-        "taxonomy_sha256": hashes["taxonomy.json"],
-        "cpg_manifest_sha256": hashes["cpg_manifest.json"],
-    }
-    mismatches = [
-        field for field, expected in expected_threshold_bindings.items() if thresholds.get(field) != expected
-    ]
-    if (
-        mismatches
-        or thresholds.get("operating_policy_met") is not True
-        or thresholds.get("evaluation_git_clean") is not True
-    ):
-        raise DxContractError(
-            "release threshold bindings are invalid"
-            + (f": {', '.join(sorted(mismatches))}" if mismatches else "")
-        )
-
-    validated = {
-        "root": root,
-        "hashes": hashes,
-        "manifest_sha256": sha256_file(root / "SHA256SUMS.json"),
-        "config": config,
-        "taxonomy": taxonomy,
-        "cpg": cpg,
-        "thresholds": thresholds,
-        "release": release_metadata,
-    }
+    if len(cpg.cpg_ids) != 387849 or hashes["cpg_manifest.json"] != manifest["cpg_manifest_sha256"]:
+        raise DxContractError("ordered 387,849-CpG contract changed")
+    taxonomy = load_taxonomy(root / "taxonomy.json")
+    if len(terminal_paths(taxonomy)) != 109:
+        raise DxContractError("ordered terminal taxonomy changed")
+    for member in manifest["members"]:
+        if "export" in member:
+            config = DxConfig.from_dict(_read_object(root / member["export"] / "config.json", "member configuration"))
+            if Taxonomy.from_dict(config.terminal_taxonomy) != taxonomy:
+                raise DxContractError("member taxonomy differs from ensemble taxonomy")
+    thresholds = validate_reporting_policy(
+        _read_object(root / "thresholds.json", "reporting policy"),
+        ensemble_sha256=hashes["ensemble.json"],
+        taxonomy_sha256=hashes["taxonomy.json"],
+    )
+    result = dict(
+        root=root,
+        release=release,
+        hashes=hashes,
+        manifest_sha256=sha256_file(root / "SHA256SUMS.json"),
+        cpg=cpg,
+        taxonomy=taxonomy,
+        thresholds=thresholds,
+        ensemble=manifest,
+    )
     if load_model:
-        model = load_dx(root, device=device)
-        taxonomy.validate_sizes(model.config.targets)
-        if model.config != config:
-            raise DxContractError("loaded model configuration differs from the validated release config")
-        validated["model"] = model
-    return validated
+        from .final_ensemble import FinalEnsemble
+
+        result["model"] = FinalEnsemble(root, device=device, verify=False)
+    return result
 
 
-def load_release(
-    explicit: str | Path | None = None,
-    *,
-    device: torch.device | str = "cpu",
-    load_model: bool = True,
-) -> dict[str, Any]:
-    """Load an explicit release or the release configured by ALMA3_RELEASE."""
+def load_release(artifact=None, *, device="cpu", load_model=True):
+    return validate_release(artifact, device=device, load_model=load_model)
 
-    raw_path = explicit if explicit is not None else os.environ.get(RELEASE_ENV)
-    if not raw_path:
-        raise DxContractError("no ALMA3 release configured; use --artifact or set ALMA3_RELEASE")
-    return validate_release(
-        Path(raw_path).expanduser(),
-        device=device,
-        load_model=load_model,
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--artifact")
+    args = p.parse_args(argv)
+    result = validate_release(args.artifact)
+    print(
+        json.dumps(
+            dict(
+                kind="alma3_release_verification",
+                schema_version=2,
+                release_version=RELEASE_VERSION,
+                manifest_sha256=result["manifest_sha256"],
+                minimum_observed_cpgs=5000,
+                representation_dimensions=1090,
+                **{
+                    key + "_sha256": result["hashes"][filename]
+                    for key, filename in (
+                        ("ensemble", "ensemble.json"),
+                        ("taxonomy", "taxonomy.json"),
+                        ("cpg_manifest", "cpg_manifest.json"),
+                        ("thresholds", "thresholds.json"),
+                    )
+                },
+            )
+        )
     )
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="alma3 verify-release",
-        description="Verify an ALMA3 release and print its machine-readable identity.",
-    )
-    parser.add_argument(
-        "--artifact",
-        help="release directory; otherwise use ALMA3_RELEASE",
-    )
-    args = parser.parse_args(argv)
-    validated = load_release(args.artifact, device="cpu")
-    summary = {
-        "kind": "alma3_release_verification",
-        "schema_version": 1,
-        "release_version": validated["release"]["version"],
-        "manifest_sha256": validated["manifest_sha256"],
-        "model_sha256": validated["hashes"]["model.safetensors"],
-        "taxonomy_sha256": validated["hashes"]["taxonomy.json"],
-        "cpg_manifest_sha256": validated["hashes"]["cpg_manifest.json"],
-        "thresholds_sha256": validated["hashes"]["thresholds.json"],
-        "minimum_observed_cpgs": validated["thresholds"]["minimum_observed_cpgs"],
-        "representation_dimensions": validated["config"].foundation.d_model,
-    }
-    print(json.dumps(summary, sort_keys=True, separators=(",", ":")))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

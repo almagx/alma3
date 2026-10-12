@@ -11,7 +11,7 @@ CANONICAL_CONDITIONS: tuple[tuple[str, float | None], ...] = (
     ("poisson_32", 32.0),
 )
 CANONICAL_BASE_SEED = 42
-MINIMUM_RUNTIME_INPUT_CPGS = 1500
+MINIMUM_RUNTIME_INPUT_CPGS = 5000
 
 
 @dataclass(frozen=True)

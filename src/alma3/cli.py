@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("verify-release", help="verify an ALMA3 release artifact", add_help=False)
     sub.add_parser(
         "export-bedmethyl-target",
-        help="export the verified ALMA3 3.0.0 GRCh38 Modkit target",
+        help="export the verified ALMA3 3.1.0 GRCh38 Modkit target",
         add_help=False,
     )
     args, rest = parser.parse_known_args(argv)
