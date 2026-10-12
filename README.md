@@ -22,6 +22,8 @@ ALMA3 3.1.0 combines nine neural classifiers and one CpG-template classifier. It
 
 ## Quick start
 
+ALMA3 3.1.0 replaces 3.0.0 and is the supported release. Update existing image pins to `3.1.0`; use the digest in the [release notes](https://github.com/almagx/alma3/releases/tag/v3.1.0) to pin the exact image.
+
 ```bash
 export ALMA3_IMAGE=ghcr.io/almagx/alma3:3.1.0
 docker pull "$ALMA3_IMAGE"
@@ -139,7 +141,7 @@ For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not us
 
 <details><summary><strong>Results</strong></summary>
 
-CSV has 29 columns for inspection and sharing; JSONL provides the structured result for software integrations. Accepted and unresolved levels are derived from the ordered diagnostic path. Release assets retain integrity checks, and inference requires at least 5,000 observed CpGs.
+CSV has 29 columns for inspection and sharing; JSONL provides the structured result for software integrations. Results follow the ordered diagnostic path, and only the subtype can be withheld by the reporting cutoff. Release assets retain integrity checks. Inputs below 5,000 observed CpGs are rejected before results are written.
 
 CSV and JSON summaries display percentages without the word "confidence". The subtype decision score has an issuance threshold at **85%**. The piecewise-linear scale maps raw probability 0 to 0, the frozen cutoff 0.3295999742967636 to 85, and 1 to 100. Issuance uses the original unrounded probability; the 109 terminal probabilities retain the raw probabilities. Differential entries contain classification and index only. Subtype scaled-score fields use the 0–100 display scale, with the cutoff at 85. The scale is not a probability of correctness.
 
@@ -147,8 +149,7 @@ CSV and JSON summaries display percentages without the word "confidence". The su
 |---|---|
 | `fully_resolved` | The applicable hierarchy was fully resolved. |
 | `heme_tumor_not_detected` | No hematolymphoid tumor signal was detected. |
-| `partially_resolved` | Earlier levels were resolved, but the next level did not reach its reporting cutoff. |
-| `no_call` | Hematolymphoid tumor presence did not reach its reporting cutoff. |
+| `partially_resolved` | The disease type was resolved; the selected subtype was below its reporting cutoff. |
 
 </details>
 
