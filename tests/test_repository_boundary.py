@@ -20,8 +20,8 @@ class RepositoryBoundaryTests(unittest.TestCase):
             "cff-version: 1.2.0",
             'type: software',
             'title: "ALMA3"',
-            'version: "3.1.0"',
-            'date-released: "2026-10-11"',
+            'version: "3.1.1"',
+            'date-released: "2026-10-12"',
             '- name: "ALMA Genomics Inc."',
             'repository-code: "https://github.com/almagx/alma3"',
             'url: "https://almagx.com/atlas"',
@@ -31,7 +31,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn(
-            "ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.0) [Computer software].",
+            "ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.1) [Computer software].",
             readme,
         )
         self.assertIn("Manuscript in preparation.", readme)
@@ -149,7 +149,7 @@ class RepositoryBoundaryTests(unittest.TestCase):
         self.assertNotIn("<summary><strong>Python</strong></summary>", readme)
         self.assertNotIn("<summary><strong>Docker</strong></summary>", readme)
         self.assertNotIn("<summary><strong>Performance</strong></summary>", readme)
-        self.assertIn("ghcr.io/almagx/alma3:3.1.0", readme)
+        self.assertIn("ghcr.io/almagx/alma3:3.1.1", readme)
         self.assertNotIn("pip install alma3", readme)
         self.assertIn(
             "Use our platform, [app.almagx.com](https://app.almagx.com/), for automated "

@@ -185,7 +185,7 @@ class RuntimeContractTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertEqual(completed.stdout.strip(), "alma3 3.1.0")
+        self.assertEqual(completed.stdout.strip(), "alma3 3.1.1")
 
         error_output = StringIO()
         with (
@@ -694,15 +694,15 @@ class RuntimeContractTests(unittest.TestCase):
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         self.assertEqual(
             hashlib.sha256(payload).hexdigest(),
-            "6e8a5dfae9bb0c63e69c1e9a186b4bd01ea2550c5460134b453a457166e8060f",
+            "5fa942dc213bbc44a7bc84c9fd727a213de8ed2cf20ce66b45ba4e0a3dd6a1b9",
         )
         self.assertEqual(
             hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-            "aeef29129fb8d3cbf911ddadfa8485b5f6523f79da29dc175918d83abf5af551",
+            "ab4526f78f251b81f1da07bc91201f144b313a20216b67d2f7d1ba7fa4254263",
         )
         self.assertEqual(manifest["kind"], "alma3_demo_dataset_manifest")
         self.assertEqual(manifest["dataset"]["compressed_bytes"], len(payload))
-        self.assertLessEqual(len(payload), 2_500_000)
+        self.assertLessEqual(len(payload), 12_000_000)
         decompressed = gzip.decompress(payload)
         self.assertEqual(
             hashlib.sha256(decompressed).hexdigest(),
@@ -717,8 +717,8 @@ class RuntimeContractTests(unittest.TestCase):
         rows = list(reader)
         expected_ids = [sample["sample_id"] for sample in manifest["samples"]]
         self.assertEqual(header[0], "sample_id")
-        self.assertEqual(len(header) - 1, 65_536)
-        self.assertEqual(len(set(header[1:])), 65_536)
+        self.assertEqual(len(header) - 1, 387_849)
+        self.assertEqual(len(set(header[1:])), 387_849)
         self.assertEqual([row[0] for row in rows], expected_ids)
         self.assertTrue(all(len(row) == len(header) for row in rows))
         self.assertEqual(

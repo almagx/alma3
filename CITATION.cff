@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: "If you use ALMA3 in academic work, please cite this software. The manuscript citation will be added when available."
 type: software
 title: "ALMA3"
-version: "3.1.0"
-date-released: "2026-10-11"
+version: "3.1.1"
+date-released: "2026-10-12"
 authors:
   - name: "ALMA Genomics Inc."
 repository-code: "https://github.com/almagx/alma3"

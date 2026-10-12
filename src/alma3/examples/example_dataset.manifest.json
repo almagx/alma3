@@ -1,9 +1,9 @@
 {
   "dataset": {
-    "compressed_bytes": 1570647,
-    "compressed_sha256": "6e8a5dfae9bb0c63e69c1e9a186b4bd01ea2550c5460134b453a457166e8060f",
-    "cpg_count": 65536,
-    "decompressed_sha256": "b83c55f3a96ca144a318b773e442789315d1b6c631f6fbc4af30561560348e01",
+    "compressed_bytes": 9126749,
+    "compressed_sha256": "5fa942dc213bbc44a7bc84c9fd727a213de8ed2cf20ce66b45ba4e0a3dd6a1b9",
+    "cpg_count": 387849,
+    "decompressed_sha256": "54429d9b6197a9cc6e8922d19f0f344312225e77ef90225e317e0ce02a2abc7d",
     "file": "example_dataset.csv.gz",
     "missing_value": "",
     "sample_count": 13,
@@ -22,25 +22,52 @@
   "samples": [
     {
       "sample_id": "demo_01",
-      "observed_cpg_count": 61790,
+      "observed_cpg_count": 362930,
       "expected_status": "heme_tumor_not_detected",
       "accepted_level": "presence",
       "accepted_classification": "absent",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (99.1%)."
+      "result_summary": "Hematolymphoid tumor not detected (99.0%)."
     },
     {
       "sample_id": "demo_03",
-      "observed_cpg_count": 63341,
-      "expected_status": "heme_tumor_not_detected",
-      "accepted_level": "presence",
-      "accepted_classification": "absent",
+      "observed_cpg_count": 381332,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "MDS-IB",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (53.9%)."
+      "result_summary": "Subtype: MDS-IB (88.9%)."
     },
     {
       "sample_id": "demo_04",
-      "observed_cpg_count": 46359,
+      "observed_cpg_count": 318587,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "Nodal marginal zone lymphoma",
+      "unresolved_level": null,
+      "result_summary": "Subtype: Nodal marginal zone lymphoma (97.1%)."
+    },
+    {
+      "sample_id": "demo_05",
+      "observed_cpg_count": 209820,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "AML with ETV6 fusion",
+      "unresolved_level": null,
+      "result_summary": "Subtype: AML with ETV6 fusion (85.8%)."
+    },
+    {
+      "sample_id": "demo_06",
+      "observed_cpg_count": 380384,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "B-ALL with MYC-r",
+      "unresolved_level": null,
+      "result_summary": "Subtype: B-ALL with MYC-r (97.9%)."
+    },
+    {
+      "sample_id": "demo_08",
+      "observed_cpg_count": 385042,
       "expected_status": "heme_tumor_not_detected",
       "accepted_level": "presence",
       "accepted_classification": "absent",
@@ -48,94 +75,67 @@
       "result_summary": "Hematolymphoid tumor not detected (61.4%)."
     },
     {
-      "sample_id": "demo_05",
-      "observed_cpg_count": 30168,
-      "expected_status": "fully_resolved",
-      "accepted_level": "subtype",
-      "accepted_classification": "AML with ETV6 fusion",
-      "unresolved_level": null,
-      "result_summary": "Subtype: AML with ETV6 fusion (85.2%)."
-    },
-    {
-      "sample_id": "demo_06",
-      "observed_cpg_count": 63284,
-      "expected_status": "heme_tumor_not_detected",
-      "accepted_level": "presence",
-      "accepted_classification": "absent",
-      "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (77.6%)."
-    },
-    {
-      "sample_id": "demo_08",
-      "observed_cpg_count": 64782,
-      "expected_status": "heme_tumor_not_detected",
-      "accepted_level": "presence",
-      "accepted_classification": "absent",
-      "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (98.2%)."
-    },
-    {
       "sample_id": "demo_09",
-      "observed_cpg_count": 40332,
+      "observed_cpg_count": 280219,
       "expected_status": "fully_resolved",
       "accepted_level": "subtype",
       "accepted_classification": "Blastic plasmacytoid dendritic cell neoplasm",
       "unresolved_level": null,
-      "result_summary": "Subtype: Blastic plasmacytoid dendritic cell neoplasm (98.5%)."
+      "result_summary": "Subtype: Blastic plasmacytoid dendritic cell neoplasm (99.0%)."
     },
     {
       "sample_id": "demo_10",
-      "observed_cpg_count": 65053,
-      "expected_status": "heme_tumor_not_detected",
-      "accepted_level": "presence",
-      "accepted_classification": "absent",
+      "observed_cpg_count": 385730,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "EBV-positive Burkitt lymphoma",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (54.3%)."
+      "result_summary": "Subtype: EBV-positive Burkitt lymphoma (98.4%)."
     },
     {
       "sample_id": "demo_11",
-      "observed_cpg_count": 53493,
-      "expected_status": "heme_tumor_not_detected",
-      "accepted_level": "presence",
-      "accepted_classification": "absent",
+      "observed_cpg_count": 354875,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "Follicular dendritic cell sarcoma",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (86.8%)."
+      "result_summary": "Subtype: Follicular dendritic cell sarcoma (97.8%)."
     },
     {
       "sample_id": "demo_12",
-      "observed_cpg_count": 65323,
-      "expected_status": "heme_tumor_not_detected",
-      "accepted_level": "presence",
-      "accepted_classification": "absent",
+      "observed_cpg_count": 387153,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "Follicular lymphoma",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (92.4%)."
+      "result_summary": "Subtype: Follicular lymphoma (88.2%)."
     },
     {
       "sample_id": "demo_14",
-      "observed_cpg_count": 65403,
+      "observed_cpg_count": 387207,
       "expected_status": "fully_resolved",
       "accepted_level": "subtype",
       "accepted_classification": "Primary LBCL of immune-privileged sites",
       "unresolved_level": null,
-      "result_summary": "Subtype: Primary LBCL of immune-privileged sites (94.1%)."
+      "result_summary": "Subtype: Primary LBCL of immune-privileged sites (99.0%)."
     },
     {
       "sample_id": "demo_15",
-      "observed_cpg_count": 53886,
-      "expected_status": "heme_tumor_not_detected",
-      "accepted_level": "presence",
-      "accepted_classification": "absent",
+      "observed_cpg_count": 355830,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "Rosai-Dorfman disease",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (95.2%)."
+      "result_summary": "Subtype: Rosai-Dorfman disease (92.7%)."
     },
     {
       "sample_id": "demo_16",
-      "observed_cpg_count": 49013,
-      "expected_status": "heme_tumor_not_detected",
-      "accepted_level": "presence",
-      "accepted_classification": "absent",
+      "observed_cpg_count": 323148,
+      "expected_status": "fully_resolved",
+      "accepted_level": "subtype",
+      "accepted_classification": "Undifferentiated pleomorphic sarcoma",
       "unresolved_level": null,
-      "result_summary": "Hematolymphoid tumor not detected (69.5%)."
+      "result_summary": "Subtype: Undifferentiated pleomorphic sarcoma (96.5%)."
     }
   ],
   "schema_version": 2

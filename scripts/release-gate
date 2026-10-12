@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEMO_GZIP_SHA256 = "6e8a5dfae9bb0c63e69c1e9a186b4bd01ea2550c5460134b453a457166e8060f"
-DEMO_MANIFEST_SHA256 = "aeef29129fb8d3cbf911ddadfa8485b5f6523f79da29dc175918d83abf5af551"
+DEMO_GZIP_SHA256 = "5fa942dc213bbc44a7bc84c9fd727a213de8ed2cf20ce66b45ba4e0a3dd6a1b9"
+DEMO_MANIFEST_SHA256 = "ab4526f78f251b81f1da07bc91201f144b313a20216b67d2f7d1ba7fa4254263"
 CANDIDATE_KIND = "alma3_docker_release_candidate_acceptance"
 CANDIDATE_SCHEMA_VERSION = 1
 CANDIDATE_MARKER = "ACCEPTANCE_COMPLETE"
@@ -173,7 +173,7 @@ def _image_identity(tag: str, source_commit: str) -> dict[str, Any]:
         or type(identity["size_bytes"]) is not int
         or identity["size_bytes"] <= 0
         or identity["revision"] != source_commit
-        or identity["version"] != "3.1.0"
+        or identity["version"] != "3.1.1"
     ):
         raise RuntimeError(f"Docker image has an invalid release identity: {identity}")
     return identity
@@ -230,8 +230,8 @@ def inspect_demo(release: Path) -> Path:
         dataset.get("compressed_sha256") != DEMO_GZIP_SHA256
         or dataset.get("compressed_bytes") != len(payload)
         or dataset.get("sample_count") != 13
-        or dataset.get("cpg_count") != 65_536
-        or len(payload) > 2_500_000
+        or dataset.get("cpg_count") != 387_849
+        or len(payload) > 12_000_000
     ):
         raise RuntimeError("packaged demo metadata is invalid")
     with gzip.GzipFile(fileobj=io.BytesIO(payload), mode="rb") as handle:
@@ -255,7 +255,7 @@ def inspect_demo(release: Path) -> Path:
     reader = csv.reader(io.StringIO(decompressed.decode("utf-8"), newline=""))
     header = next(reader)
     rows = list(reader)
-    if header[0] != "sample_id" or len(set(header[1:])) != len(header)-1 or not set(header[1:]) <= set(validated["cpg"].cpg_ids):
+    if header != ["sample_id", *validated["cpg"].cpg_ids]:
         raise RuntimeError("packaged demo CpG columns do not match the release")
     expected_ids = [sample["sample_id"] for sample in manifest["samples"]]
     if [row[0] for row in rows] != expected_ids or any(len(row) != len(header) for row in rows):
@@ -347,7 +347,7 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
     directories = {path.relative_to(candidate).as_posix() for path in paths if path.is_dir()}
     if directories != {"image"}:
         raise RuntimeError("release candidate directory layout is invalid")
-    image_name = "image/alma3-3.1.0-cpu.tar"
+    image_name = "image/alma3-3.1.1-cpu.tar"
     payloads = {"acceptance.json", image_name}
     if files != payloads | {"SHA256SUMS.json", CANDIDATE_MARKER}:
         raise RuntimeError("release candidate file set is invalid")
@@ -383,7 +383,7 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
 
 def _expected_candidate_name(source: dict[str, Any], release_identity: dict[str, Any]) -> str:
     return (
-        f"alma3-3.1.0-docker-{source['commit'][:8]}-"
+        f"alma3-3.1.1-docker-{source['commit'][:8]}-"
         f"{release_identity['manifest_sha256'][:8]}"
     )
 
@@ -409,7 +409,7 @@ def _seal_candidate(
 
     image_identity = _image_identity(image_tag, source["commit"])
     with _atomic_candidate(output) as temporary:
-        image_output = temporary / "image" / "alma3-3.1.0-cpu.tar"
+        image_output = temporary / "image" / "alma3-3.1.1-cpu.tar"
         image_output.parent.mkdir(parents=True)
         run(["docker", "image", "save", "--output", str(image_output), image_tag])
         with image_output.open("rb") as handle:
@@ -422,8 +422,8 @@ def _seal_candidate(
             raise RuntimeError("Docker archive round trip changed the tested image")
 
         publication_tags = [
-            f"{PUBLIC_IMAGE}:3.1.0",
-            f"{PUBLIC_IMAGE}:3.1.0-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}",
+            f"{PUBLIC_IMAGE}:3.1.1",
+            f"{PUBLIC_IMAGE}:3.1.1-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}",
         ]
         acceptance = {
             "citation": citation,
@@ -459,7 +459,7 @@ def _seal_candidate(
         _write_new(temporary / "acceptance.json", _canonical_json(acceptance))
         checksums = {
             "acceptance.json": _sha256(temporary / "acceptance.json"),
-            "image/alma3-3.1.0-cpu.tar": image_archive_sha256,
+            "image/alma3-3.1.1-cpu.tar": image_archive_sha256,
         }
         _write_new(temporary / "SHA256SUMS.json", _canonical_json(checksums))
         for name, expected in checksums.items():
@@ -503,7 +503,7 @@ def main() -> int:
 
     source_contract = runtime_contract(ROOT / "src" / "alma3")
     manifest_path = inspect_demo(release)
-    image_tag = f"{PUBLIC_IMAGE}:3.1.0-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}"
+    image_tag = f"{PUBLIC_IMAGE}:3.1.1-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}"
     run(
         [
             "docker",
@@ -519,7 +519,7 @@ def main() -> int:
             "--label",
             f"org.opencontainers.image.revision={source['commit']}",
             "--label",
-            "org.opencontainers.image.version=3.1.0",
+            "org.opencontainers.image.version=3.1.1",
             "-t",
             image_tag,
             ".",

@@ -17,7 +17,7 @@ ALMA3 classifies hematolymphoid tumors using DNA methylation. It works with meth
 ## Quick start
 
 ```bash
-export ALMA3_IMAGE=ghcr.io/almagx/alma3:3.1.0
+export ALMA3_IMAGE=ghcr.io/almagx/alma3:3.1.1
 docker pull "$ALMA3_IMAGE"
 docker run --rm --user "$(id -u):$(id -g)" \
   -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" demo
@@ -143,7 +143,7 @@ For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not us
 
 <details><summary><strong>Citation</strong></summary>
 
-ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.0) [Computer software]. https://github.com/almagx/alma3
+ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.1) [Computer software]. https://github.com/almagx/alma3
 
 Manuscript in preparation.
 
