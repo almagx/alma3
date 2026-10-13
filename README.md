@@ -10,7 +10,7 @@
   </p>
 </div>
 
-## Model introduction
+## Introduction
 
 ALMA3 classifies hematolymphoid tumors using epigenomics. Its WHO/ICC-aligned classification hierarchy spans tumor presence, 5 lineages, 15 families, 35 types and 107 subtypes, retaining a broader classification when the subtype is uncertain. It accepts Illumina methylation arrays, Oxford Nanopore and PacBio HiFi.
 
