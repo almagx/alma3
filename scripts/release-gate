@@ -508,6 +508,7 @@ def main() -> int:
         [
             "docker",
             "build",
+            "--provenance=false",
             "--platform",
             "linux/amd64",
             "--build-context",
