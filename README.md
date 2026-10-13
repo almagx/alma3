@@ -17,23 +17,22 @@ ALMA3 classifies hematolymphoid tumors using DNA methylation. It works with meth
 ## Quick start
 
 ```bash
-export ALMA3_IMAGE=ghcr.io/almagx/alma3:3.1.1
+ALMA3_IMAGE=ghcr.io/almagx/alma3:3.1.2
 docker pull "$ALMA3_IMAGE"
-docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" demo
+docker run --rm -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" demo
 ```
+
+The demo generates `alma3-demo.csv` in your current folder. These commands work with standard and rootless Docker: ALMA3 uses the working folder's owner to read inputs and write results directly. Use a folder you own. If your system requires sudo to access Docker, prefix the Docker commands with `sudo`.
 
 Run your own sample:
 
 ```bash
 # Complete JSONL
-docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
+docker run --rm -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
   infer -i sample.bed -o sample.alma3.jsonl
 
 # Clinician-readable CSV
-docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
+docker run --rm -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
   infer -i sample.bed -o sample.alma3.csv
 ```
 
@@ -62,8 +61,7 @@ The image includes the model and runs on an x86-64 CPU with at least 16 GB RAM.
 Infinium arrays cannot distinguish 5mC from 5hmC. For ONT, combine both with pinned Modkit `v0.6.3`. The BAM must be coordinate-sorted and indexed against the same chr-prefixed GRCh38 FASTA, with an adjacent `.fai`.
 
 ```bash
-docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work" "$ALMA3_IMAGE" \
+docker run --rm -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
   export-bedmethyl-target \
     --reference /work/GRCh38.fa \
     --output /work/alma3-3.1.0-grch38-cpgs.bed
@@ -81,8 +79,7 @@ docker run --rm \
     --include-bed /work/alma3-3.1.0-grch38-cpgs.bed \
     --ref /work/GRCh38.fa
 
-docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
+docker run --rm -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
   infer -i sample.bed -o sample.alma3.csv
 ```
 
@@ -122,8 +119,7 @@ awk -v target_file="alma3-3.1.0-grch38-cpgs.bed" '
   }
 ' > sample.5mc.bed
 
-docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
+docker run --rm -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
   infer -i sample.5mc.bed -o sample.alma3.csv
 ```
 
@@ -143,7 +139,7 @@ For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not us
 
 <details><summary><strong>Citation</strong></summary>
 
-ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.1) [Computer software]. https://github.com/almagx/alma3
+ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.2) [Computer software]. https://github.com/almagx/alma3
 
 Manuscript in preparation.
 

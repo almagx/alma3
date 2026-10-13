@@ -185,7 +185,7 @@ class RuntimeContractTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertEqual(completed.stdout.strip(), "alma3 3.1.1")
+        self.assertEqual(completed.stdout.strip(), "alma3 3.1.2")
 
         error_output = StringIO()
         with (

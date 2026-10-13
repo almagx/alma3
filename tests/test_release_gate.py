@@ -69,7 +69,7 @@ class ReleaseGateCandidateTests(unittest.TestCase):
     def test_candidate_verifier_rejects_tampering(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             candidate = Path(raw)
-            image = candidate / "image" / "alma3-3.1.1-cpu.tar"
+            image = candidate / "image" / "alma3-3.1.2-cpu.tar"
             image.parent.mkdir()
             image_id = _write_docker_archive(image)
             acceptance = {
@@ -85,7 +85,7 @@ class ReleaseGateCandidateTests(unittest.TestCase):
             (candidate / "acceptance.json").write_bytes(GATE["_canonical_json"](acceptance))
             checksums = {
                 "acceptance.json": GATE["_sha256"](candidate / "acceptance.json"),
-                "image/alma3-3.1.1-cpu.tar": GATE["_sha256"](image),
+                "image/alma3-3.1.2-cpu.tar": GATE["_sha256"](image),
             }
             (candidate / "SHA256SUMS.json").write_bytes(GATE["_canonical_json"](checksums))
             (candidate / GATE["CANDIDATE_MARKER"]).write_bytes(b"complete\n")
@@ -105,13 +105,13 @@ class ReleaseGateCandidateTests(unittest.TestCase):
         release = {"manifest_sha256": "b" * 64}
         self.assertEqual(
             GATE["_expected_candidate_name"](source, release),
-            "alma3-3.1.1-docker-aaaaaaaa-bbbbbbbb",
+            "alma3-3.1.2-docker-aaaaaaaa-bbbbbbbb",
         )
 
     def test_current_citation_matches_software_citation(self) -> None:
         self.assertEqual(
             GATE["_citation_value"](),
-            "ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.1) [Computer software]. "
+            "ALMA Genomics Inc. (2026). ALMA3 (Version 3.1.2) [Computer software]. "
             "https://github.com/almagx/alma3\n\n"
             "Manuscript in preparation.",
         )

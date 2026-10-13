@@ -7,6 +7,7 @@ RUN apt-get update \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends procps \
     && command -v ps >/dev/null \
+    && command -v setpriv >/dev/null \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md LICENSE requirements.txt ./
@@ -47,7 +48,6 @@ FROM runtime AS standalone
 
 USER root
 COPY --from=alma3_release --chown=almauser:almauser / /opt/alma3/release/
-USER almauser
 
 ENV ALMA3_RELEASE=/opt/alma3/release
 

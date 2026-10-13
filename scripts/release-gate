@@ -173,7 +173,7 @@ def _image_identity(tag: str, source_commit: str) -> dict[str, Any]:
         or type(identity["size_bytes"]) is not int
         or identity["size_bytes"] <= 0
         or identity["revision"] != source_commit
-        or identity["version"] != "3.1.1"
+        or identity["version"] != "3.1.2"
     ):
         raise RuntimeError(f"Docker image has an invalid release identity: {identity}")
     return identity
@@ -347,7 +347,7 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
     directories = {path.relative_to(candidate).as_posix() for path in paths if path.is_dir()}
     if directories != {"image"}:
         raise RuntimeError("release candidate directory layout is invalid")
-    image_name = "image/alma3-3.1.1-cpu.tar"
+    image_name = "image/alma3-3.1.2-cpu.tar"
     payloads = {"acceptance.json", image_name}
     if files != payloads | {"SHA256SUMS.json", CANDIDATE_MARKER}:
         raise RuntimeError("release candidate file set is invalid")
@@ -383,7 +383,7 @@ def _verify_candidate(candidate: Path) -> dict[str, Any]:
 
 def _expected_candidate_name(source: dict[str, Any], release_identity: dict[str, Any]) -> str:
     return (
-        f"alma3-3.1.1-docker-{source['commit'][:8]}-"
+        f"alma3-3.1.2-docker-{source['commit'][:8]}-"
         f"{release_identity['manifest_sha256'][:8]}"
     )
 
@@ -409,7 +409,7 @@ def _seal_candidate(
 
     image_identity = _image_identity(image_tag, source["commit"])
     with _atomic_candidate(output) as temporary:
-        image_output = temporary / "image" / "alma3-3.1.1-cpu.tar"
+        image_output = temporary / "image" / "alma3-3.1.2-cpu.tar"
         image_output.parent.mkdir(parents=True)
         run(["docker", "image", "save", "--output", str(image_output), image_tag])
         with image_output.open("rb") as handle:
@@ -422,8 +422,8 @@ def _seal_candidate(
             raise RuntimeError("Docker archive round trip changed the tested image")
 
         publication_tags = [
-            f"{PUBLIC_IMAGE}:3.1.1",
-            f"{PUBLIC_IMAGE}:3.1.1-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}",
+            f"{PUBLIC_IMAGE}:3.1.2",
+            f"{PUBLIC_IMAGE}:3.1.2-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}",
         ]
         acceptance = {
             "citation": citation,
@@ -459,7 +459,7 @@ def _seal_candidate(
         _write_new(temporary / "acceptance.json", _canonical_json(acceptance))
         checksums = {
             "acceptance.json": _sha256(temporary / "acceptance.json"),
-            "image/alma3-3.1.1-cpu.tar": image_archive_sha256,
+            "image/alma3-3.1.2-cpu.tar": image_archive_sha256,
         }
         _write_new(temporary / "SHA256SUMS.json", _canonical_json(checksums))
         for name, expected in checksums.items():
@@ -503,7 +503,7 @@ def main() -> int:
 
     source_contract = runtime_contract(ROOT / "src" / "alma3")
     manifest_path = inspect_demo(release)
-    image_tag = f"{PUBLIC_IMAGE}:3.1.1-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}"
+    image_tag = f"{PUBLIC_IMAGE}:3.1.2-{source['commit'][:8]}-{release_identity['manifest_sha256'][:8]}"
     run(
         [
             "docker",
@@ -519,7 +519,7 @@ def main() -> int:
             "--label",
             f"org.opencontainers.image.revision={source['commit']}",
             "--label",
-            "org.opencontainers.image.version=3.1.1",
+            "org.opencontainers.image.version=3.1.2",
             "-t",
             image_tag,
             ".",
@@ -552,7 +552,7 @@ def main() -> int:
         ]
     )
     with tempfile.TemporaryDirectory(prefix="alma3-docker-release-gate-") as raw:
-        output_user = f"{os.getuid()}:{os.getgid()}"
+        folder_stat = Path(raw).stat()
         demo_output = Path(raw) / "alma3-demo.jsonl"
         run(
             [
@@ -561,17 +561,20 @@ def main() -> int:
                 "--rm",
                 "--network",
                 "none",
-                "--user",
-                output_user,
                 "-v",
-                f"{raw}:/out",
+                f"{raw}:/work",
+                "--workdir",
+                "/work",
                 image_tag,
                 "demo",
                 "-o",
-                "/out/alma3-demo.jsonl",
+                "alma3-demo.jsonl",
             ]
         )
         inspect_demo_results(demo_output, manifest_path)
+        result_stat = demo_output.stat()
+        if (result_stat.st_uid, result_stat.st_gid) != (folder_stat.st_uid, folder_stat.st_gid):
+            raise RuntimeError("Docker results must belong to the working folder's owner and group")
 
     _seal_candidate(
         output,
