@@ -19,42 +19,23 @@ ALMA3 classifies hematolymphoid tumors using DNA methylation. It works with meth
 ```bash
 export ALMA3_IMAGE=ghcr.io/almagx/alma3:3.1.1
 docker pull "$ALMA3_IMAGE"
-(
-  set -e
-  results=alma3-demo
-  mkdir -m 700 "$results"
-  container=$(docker create --network none "$ALMA3_IMAGE" demo -o /tmp/alma3-demo.csv)
-  trap 'status=$?; docker rm -f "$container" >/dev/null || { [ "$status" -ne 0 ] || status=1; }; exit "$status"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  docker start --attach "$container"
-  docker cp "$container:/tmp/alma3-demo.csv" "$results/"
-)
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" demo
 ```
 
-The demo generates `alma3-demo/alma3-demo.csv`.
-
-Run your own prepared sample:
+Run your own sample:
 
 ```bash
-(
-  set -e
-  input=./sample.bed
-  output=sample.alma3.csv
-  results=alma3-results
-  mkdir -m 700 "$results"
-  container=$(docker create --network none --user 0:0 "$ALMA3_IMAGE" \
-    infer -i "/tmp/$(basename "$input")" -o "/tmp/$output")
-  trap 'status=$?; docker rm -f "$container" >/dev/null || { [ "$status" -ne 0 ] || status=1; }; exit "$status"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-  docker cp -L "$input" "$container:/tmp/$(basename "$input")"
-  docker start --attach "$container"
-  docker cp "$container:/tmp/$output" "$results/"
-)
-```
+# Complete JSONL
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
+  infer -i sample.bed -o sample.alma3.jsonl
 
-Set `input` to your prepared file and `results` to a new folder. Use a `.csv` output for a table or `.jsonl` for complete results. Existing results folders are preserved.
+# Clinician-readable CSV
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
+  infer -i sample.bed -o sample.alma3.csv
+```
 
 The image includes the model and runs on an x86-64 CPU with at least 16 GB RAM.
 
@@ -99,9 +80,11 @@ docker run --rm \
     --no-filtering \
     --include-bed /work/alma3-3.1.0-grch38-cpgs.bed \
     --ref /work/GRCh38.fa
-```
 
-Analyze `sample.bed` using the own-sample instructions in [Quick start](#quick-start).
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
+  infer -i sample.bed -o sample.alma3.csv
+```
 
 This Modkit command produces combined 5mC+5hmC input, which ALMA3 detects automatically. See Modkit's [targeting documentation](https://nanoporetech.github.io/modkit/intro_include_bed.html) and [v0.6.3 release](https://github.com/nanoporetech/modkit/releases/tag/v0.6.3).
 
@@ -138,9 +121,11 @@ awk -v target_file="alma3-3.1.0-grch38-cpgs.bed" '
     print $1, $2, $3, "m", 0, ".", $2, $3, "255,0,0", $6, $4
   }
 ' > sample.5mc.bed
-```
 
-Analyze `sample.5mc.bed` using the own-sample instructions in [Quick start](#quick-start).
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" \
+  infer -i sample.5mc.bed -o sample.alma3.csv
+```
 
 For `type=Total` rows, use column 4 `mod_score` and column 6 coverage. Do not use count mode or `discretized_mod_score`. Filter after pileup because the model uses neighboring CpGs. The converted file uses `m`, so ALMA3 detects 5mC automatically. MethBat is not validated for ALMA3.
 

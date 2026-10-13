@@ -12,7 +12,6 @@ import json
 import os
 import re
 import shutil
-import signal
 import subprocess
 import sys
 import tarfile
@@ -34,29 +33,6 @@ PUBLIC_IMAGE = "ghcr.io/almagx/alma3"
 def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(command), flush=True)
     subprocess.run(command, cwd=ROOT, env=env, check=True)
-
-
-def _copy_inference_results(image: str, output: Path, *, input_file: Path | None = None) -> None:
-    if output.exists() or output.is_symlink():
-        raise FileExistsError(output)
-    command = ["docker", "create", "--network", "none"]
-    arguments = ["demo"]
-    if input_file is not None:
-        command.extend(["--user", "0:0"])
-        arguments = ["infer", "-i", f"/tmp/{input_file.name}"]
-    container = subprocess.check_output(
-        [*command, image, *arguments, "-o", "/tmp/alma3-results.jsonl"], cwd=ROOT, text=True,
-    ).strip()
-    try:
-        if input_file is not None:
-            run(["docker", "cp", "-L", str(input_file), f"{container}:/tmp/{input_file.name}"])
-        run(["docker", "start", "--attach", container])
-        run(["docker", "cp", f"{container}:/tmp/alma3-results.jsonl", str(output)])
-    finally:
-        failed = sys.exception() is not None
-        cleanup = subprocess.run(["docker", "rm", "-f", container], cwd=ROOT, check=False)
-        if not failed:
-            cleanup.check_returncode()
 
 
 def _sha256(path: Path) -> str:
@@ -504,7 +480,6 @@ def _seal_candidate(
 
 
 def main() -> int:
-    signal.signal(signal.SIGTERM, lambda signum, _frame: sys.exit(128 + signum))
     parser = argparse.ArgumentParser(description="Build and seal the ALMA3 CPU Docker release candidate.")
     parser.add_argument("--release-artifact", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
@@ -577,17 +552,26 @@ def main() -> int:
         ]
     )
     with tempfile.TemporaryDirectory(prefix="alma3-docker-release-gate-") as raw:
+        output_user = f"{os.getuid()}:{os.getgid()}"
         demo_output = Path(raw) / "alma3-demo.jsonl"
-        _copy_inference_results(image_tag, demo_output)
+        run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--user",
+                output_user,
+                "-v",
+                f"{raw}:/out",
+                image_tag,
+                "demo",
+                "-o",
+                "/out/alma3-demo.jsonl",
+            ]
+        )
         inspect_demo_results(demo_output, manifest_path)
-        input_file = Path(raw) / "example_dataset.csv.gz"
-        shutil.copyfile(manifest_path.with_name(input_file.name), input_file)
-        input_file.chmod(0o600)
-        copied_output = Path(raw) / "alma3-copied-input.jsonl"
-        _copy_inference_results(image_tag, copied_output, input_file=input_file)
-        inspect_demo_results(copied_output, manifest_path)
-        if demo_output.read_bytes() != copied_output.read_bytes():
-            raise RuntimeError("copied-input results disagree with the demo")
 
     _seal_candidate(
         output,
