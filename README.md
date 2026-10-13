@@ -22,7 +22,7 @@ docker pull "$ALMA3_IMAGE"
 docker run --rm -v "$PWD:/work" --workdir /work "$ALMA3_IMAGE" demo
 ```
 
-The demo generates `alma3-demo.csv` in your current folder. These commands work with standard and rootless Docker: ALMA3 uses the working folder's owner to read inputs and write results directly. Use a folder you own. If your system requires sudo to access Docker, prefix the Docker commands with `sudo`.
+The demo generates `alma3-demo.csv` in your current folder.
 
 Run your own sample:
 
